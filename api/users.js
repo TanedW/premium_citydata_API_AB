@@ -27,11 +27,11 @@ export default async function handler(req) {
   if (req.method === 'POST') {
     // === CREATE (สร้างข้อมูลใหม่) ===
     try {
-      const { Email, First_Name, Last_Name, Provider, Provider_ID } = await req.json(); // รับข้อมูลจาก body
+      const { Email, First_Name, Last_Name, Provider, Access_Token } = await req.json(); // รับข้อมูลจาก body
       const sql = neon(process.env.DATABASE_URL);
       
-      const newItem = await sql`INSERT INTO users (Email, First_Name, Last_Name, Provider, Provider_ID) VALUES 
-      (${Email}, ${First_Name}, ${Last_Name}, ${Provider}, ${Provider_ID}) RETURNING *;`;
+      const newItem = await sql`INSERT INTO users (Email, First_Name, Last_Name, Provider, Access_Token) VALUES 
+      (${Email}, ${First_Name}, ${Last_Name}, ${Provider}, ${Access_Token}) RETURNING *;`;
       
       return new Response(JSON.stringify(newItem[0]), { status: 201 });
     } catch (error) {
