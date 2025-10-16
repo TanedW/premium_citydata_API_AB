@@ -1,84 +1,74 @@
-// api/users.js (หรือไฟล์ API ของคุณ)
+// /api/users.js
 
+// แนะนำให้ใช้ Edge Runtime ของ Vercel เพื่อประสิทธิภาพสูงสุด
 export const config = {
   runtime: 'edge',
 };
 
 import { neon } from '@neondatabase/serverless';
 
-// (ส่วนของ CORS ควรมีอยู่เหมือนเดิม)
+// ตั้งค่า CORS Headers สำหรับอนุญาตให้ React App ของคุณเรียกใช้ API นี้ได้
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // <--- URL ของ React App ของคุณ
+  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // <-- URL ของ React App ของคุณ
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+// ฟังก์ชันหลักของ API
 export default async function handler(req) {
-  // ตอบกลับ preflight request ของ CORS
+  // ตอบกลับ request แบบ 'OPTIONS' (Preflight) ที่ Browser ส่งมาถามเพื่อเช็ค CORS
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  // ... (โค้ดสำหรับ GET method สามารถคงไว้เหมือนเดิม) ...
-
-  // --- Logic ใหม่ทั้งหมดสำหรับ POST Method ---
+  // --- Logic หลักสำหรับ HTTP POST (เมื่อมีการล็อกอิน) ---
   if (req.method === 'POST') {
     try {
-      // 1. รับข้อมูลจาก Frontend
+      // 1. รับข้อมูลผู้ใช้ที่ล็อกอินสำเร็จจาก Frontend
       const { email, first_name, last_name, provider, access_token } = await req.json();
       const sql = neon(process.env.DATABASE_URL);
 
-      // 2. ค้นหาผู้ใช้ด้วยอีเมลที่ได้รับมา
+      // 2. ค้นหาในฐานข้อมูลว่ามีผู้ใช้ที่ใช้อีเมลนี้อยู่แล้วหรือไม่
       const existingUser = await sql`SELECT * FROM users WHERE "email" = ${email}`;
 
-      // 3. ตรวจสอบว่ามีผู้ใช้นี้ในระบบแล้วหรือไม่
+      // 3. ตรวจสอบผลลัพธ์การค้นหา
       if (existingUser.length > 0) {
-        // ---> กรณีที่ 1: มีผู้ใช้ในระบบแล้ว (อีเมลซ้ำ)
-        console.log(`email ${email} exists. Linking account.`);
+        // --- กรณีที่ 1: เจอผู้ใช้ (อีเมลซ้ำ) -> ทำการอัปเดตและรวมบัญชี ---
         const user = existingUser[0];
 
-        // ตรวจสอบว่า provider ใหม่นี้เคยเชื่อมต่อแล้วหรือยัง
+        // ตรวจสอบว่า provider ที่เข้ามาใหม่ เคยผูกกับบัญชีนี้แล้วหรือยัง
         const providerExists = user.providers && user.providers.includes(provider);
 
-        let updatedUser;
-        if (providerExists) {
-          // ถ้าเคยเชื่อมแล้ว อัปเดตแค่ Access Token ล่าสุด
-          updatedUser = await sql`
-            UPDATE users 
-            SET "access_token" = ${access_token}, "last_name" = ${last_name}, "first_name" = ${first_name} 
-            WHERE "email" = ${email} 
-            RETURNING *;
-          `;
-        } else {
-          // ถ้าเป็น provider ใหม่ ให้เพิ่มเข้าไปใน array
-          updatedUser = await sql`
+        const updatedUser = await sql`
             UPDATE users 
             SET 
               "access_token" = ${access_token}, 
               "last_name" = ${last_name}, 
               "first_name" = ${first_name},
-              providers = array_append(providers, ${provider}) 
+              -- ถ้ายังไม่มี provider นี้ ให้เพิ่มเข้าไปใน Array, ถ้ามีแล้วให้คงเดิม
+              providers = CASE 
+                            WHEN ${providerExists} = TRUE THEN providers 
+                            ELSE array_append(providers, ${provider}) 
+                          END
             WHERE "email" = ${email} 
             RETURNING *;
           `;
-        }
         
-        // ส่งข้อมูลผู้ใช้ที่อัปเดตแล้วกลับไป
+        // ส่งข้อมูลผู้ใช้ที่อัปเดตแล้วกลับไป (Status 200 OK)
         return new Response(JSON.stringify(updatedUser[0]), { 
-            status: 200, // ส่ง 200 OK แทน 201 Created
+            status: 200, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
 
       } else {
-        // ---> กรณีที่ 2: ยังไม่มีผู้ใช้ในระบบ (New User)
-        console.log(`email ${email} not found. Creating new user.`);
+        // --- กรณีที่ 2: ไม่เจอผู้ใช้ -> สร้างผู้ใช้ใหม่ ---
         const newUser = await sql`
-          INSERT INTO users ("email", "first_name", "last_name", "provider", "access_token", providers) 
-          VALUES (${email}, ${first_name}, ${last_name}, ${provider}, ${access_token}, ARRAY[${provider}]) 
+          INSERT INTO users ("email", "first_name", "last_name", "access_token", providers) 
+          VALUES (${email}, ${first_name}, ${last_name}, ${access_token}, ARRAY[${provider}]) 
           RETURNING *;
         `;
         
-        // ส่งข้อมูลผู้ใช้ใหม่กลับไป
+        // ส่งข้อมูลผู้ใช้ใหม่กลับไป (Status 201 Created)
         return new Response(JSON.stringify(newUser[0]), { 
             status: 201, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -86,10 +76,18 @@ export default async function handler(req) {
       }
 
     } catch (error) {
+      // กรณีเกิดข้อผิดพลาดในการเชื่อมต่อหรือคำสั่ง SQL
       console.error("API Error:", error);
-      return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { status: 500, headers: corsHeaders });
+      return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
+          status: 500, 
+          headers: corsHeaders 
+      });
     }
   }
 
-  return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { status: 405, headers: corsHeaders });
+  // หากมีการเรียกด้วย Method อื่นที่ไม่ใช่ POST หรือ OPTIONS
+  return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
+      status: 405, 
+      headers: corsHeaders 
+  });
 }
