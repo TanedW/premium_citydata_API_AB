@@ -4,6 +4,7 @@ export const config = {
 };
 
 import { neon } from '@neondatabase/serverless';
+DATABASE_URL='postgresql://neondb_owner:npg_F89piaVZKBjf@ep-quiet-art-adqqwbyu-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
 
 // ฟังก์ชันหลักที่จะถูกเรียกเมื่อมี request เข้ามาที่ /api/items
 export default async function handler(req) {
@@ -12,7 +13,7 @@ export default async function handler(req) {
     // === READ (ดึงข้อมูล) ===
     try {
       const sql = neon(process.env.DATABASE_URL); // เชื่อมต่อ DB จาก Environment Variable
-      const items = await sql`SELECT * FROM your_table_name;`; // **<-- แก้ชื่อตารางตรงนี้**
+      const items = await sql`SELECT * FROM users;`; // **<-- แก้ชื่อตารางตรงนี้**
       
       return new Response(JSON.stringify(items), {
         status: 200,
@@ -26,10 +27,11 @@ export default async function handler(req) {
   if (req.method === 'POST') {
     // === CREATE (สร้างข้อมูลใหม่) ===
     try {
-      const { name, description } = await req.json(); // รับข้อมูลจาก body
+      const { Email, First_Name, Last_Name, Provider, Provider_ID } = await req.json(); // รับข้อมูลจาก body
       const sql = neon(process.env.DATABASE_URL);
       
-      const newItem = await sql`INSERT INTO your_table_name (name, description) VALUES (${name}, ${description}) RETURNING *;`;
+      const newItem = await sql`INSERT INTO users (Email, First_Name, Last_Name, Provider, Provider_ID) VALUES 
+      (${Email}, ${First_Name}, ${Last_Name}, ${Provider}, ${Provider_ID}) RETURNING *;`;
       
       return new Response(JSON.stringify(newItem[0]), { status: 201 });
     } catch (error) {
