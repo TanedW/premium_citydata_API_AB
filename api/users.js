@@ -34,7 +34,7 @@ export default async function handler(req) {
       // ✅ ถูกต้อง: ดึงค่ามาจาก Environment Variable
       const sql = neon(process.env.DATABASE_URL);
       
-      const newItem = await sql`INSERT INTO users (email, "first_Name", "last_Name", "provider", "access_Token") VALUES (${email}, ${first_name}, ${last_name}, ${provider}, ${access_Token}) RETURNING *;`;
+      const newItem = await sql`INSERT INTO users (email, "first_name", "last_name", "provider", "access_Token") VALUES (${email}, ${first_name}, ${last_name}, ${provider}, ${access_Token}) RETURNING *;`;
       
       return new Response(JSON.stringify(newItem[0]), { status: 201 });
     } catch (error) {
