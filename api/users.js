@@ -29,12 +29,12 @@ export default async function handler(req) {
   if (req.method === 'POST') {
     // === CREATE (สร้างข้อมูลใหม่) ===
     try {
-      const { email, first_name, last_name, provider, access_Token } = await req.json(); // รับข้อมูลจาก body
+      const { email, first_name, last_name, provider, access_token } = await req.json(); // รับข้อมูลจาก body
       
       // ✅ ถูกต้อง: ดึงค่ามาจาก Environment Variable
       const sql = neon(process.env.DATABASE_URL);
       
-      const newItem = await sql`INSERT INTO users (email, "first_name", "last_name", "provider", "access_Token") VALUES (${email}, ${first_name}, ${last_name}, ${provider}, ${access_Token}) RETURNING *;`;
+      const newItem = await sql`INSERT INTO users (email, "first_name", "last_name", "provider", "access_token") VALUES (${email}, ${first_name}, ${last_name}, ${provider}, ${access_token}) RETURNING *;`;
       
       return new Response(JSON.stringify(newItem[0]), { status: 201 });
     } catch (error) {
