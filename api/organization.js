@@ -13,6 +13,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+export default async function handler(req) {
+
   if (req.method === 'POST') {
     try {
       // 1. รับข้อมูลผู้ใช้ที่ล็อกอินสำเร็จจาก Frontend
@@ -63,3 +65,4 @@ const corsHeaders = {
       status: 405, 
       headers: corsHeaders 
   });
+}
