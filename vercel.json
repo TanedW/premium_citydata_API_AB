@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "api/organization.js": {
-      "runtime": "nodejs22.x"
-    }
-  }
-}
