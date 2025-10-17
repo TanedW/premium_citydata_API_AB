@@ -22,23 +22,21 @@ export default async function handler(req) {
       const sql = neon(process.env.DATABASE_URL);
 
       // 2. ค้นหาในฐานข้อมูลว่ามีผู้ใช้ที่ใช้อีเมลนี้อยู่แล้วหรือไม่
-      const existingOrganization = await sql`SELECT * FROM organization WHERE "organization_code" = ${organization_code}`;
+      const existingOrganization = await sql`SELECT * FROM organizations WHERE "organization_code" = ${organization_code}`;
 
       // 3. ตรวจสอบผลลัพธ์การค้นหา
       if (existingOrganization.length > 0) {
         // --- กรณีที่ 1: เจอผู้ใช้ (อีเมลซ้ำ) -> ทำการอัปเดตและรวมบัญชี ---
-        const user = existingOrganization[0];
-
-        // ส่งข้อมูลผู้ใช้ที่อัปเดตแล้วกลับไป (Status 200 OK)
-        return new Response(JSON.stringify(updatedUser[0]), { 
+        return new Response(JSON.stringify([0]), { 
             status: 200, 
+            message: 'Organization already exists',
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
 
       } else {
         // --- กรณีที่ 2: ไม่เจอผู้ใช้ -> สร้างผู้ใช้ใหม่ ---
         const newOrganization = await sql`
-          INSERT INTO users ("organization_code", "organization_name") 
+          INSERT INTO organizations ("organization_code", "organization_name") 
           VALUES (${organization_code}, ${organization_name}) 
           RETURNING *;
         `;
