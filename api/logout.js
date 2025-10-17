@@ -43,9 +43,9 @@ export default async function handler(req) {
     try {
       // 1. ดึง Access Token จาก Header 'Authorization'
       const authHeader = req.headers.get('authorization');
-    //   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    //     return new Response(JSON.stringify({ message: 'Authorization header is missing or invalid' }), { status: 401, headers: corsHeaders });
-    //   }
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return new Response(JSON.stringify({ message: 'Authorization header is missing or invalid' }), { status: 401, headers: corsHeaders });
+      }
       const accessToken = authHeader.split(' ')[1];
 
       const sql = neon(process.env.DATABASE_URL);
@@ -75,7 +75,7 @@ export default async function handler(req) {
       
       // 5. [ทางเลือก แนะนำอย่างยิ่ง] ทำให้ Token นี้ใช้ไม่ได้อีก (Invalidate Token)
       // โดยการลบค่า access_token ของผู้ใช้ออกจากฐานข้อมูล
-    //   await sql`UPDATE users SET "access_token" = NULL WHERE "user_id" = ${userId}`;
+      await sql`UPDATE users SET "access_token" = NULL WHERE "user_id" = ${userId}`;
 
       // 6. ส่งคำตอบกลับไปว่า Logout สำเร็จ
       return new Response(JSON.stringify({ message: 'Logout successful' }), { status: 200, headers: corsHeaders });
