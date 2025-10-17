@@ -40,7 +40,9 @@ export default async function handler(req) {
 
   if (req.method === 'POST') {
     // --- [เพิ่มใหม่] ดึงข้อมูล IP และ User-Agent จาก Request ---
-    const ipAddress = req.ip || null; // req.ip ใช้งานได้ใน Vercel Edge Runtime
+    const forwarded = req.headers.get('x-forwarded-for');
+    const ipAddress = forwarded ? forwarded.split(',')[0].trim() : null;
+    
     const userAgent = req.headers.get('user-agent') || null; // .get() เป็นวิธีมาตรฐานของ Headers API
     
     let email, provider; // ประกาศตัวแปรไว้นอก try เพื่อใช้ใน catch ได้
