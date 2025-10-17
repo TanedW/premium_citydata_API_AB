@@ -1,21 +1,25 @@
 // /api/users.js
 
-// แนะนำให้ใช้ Edge Runtime ของ Vercel เพื่อประสิทธิภาพสูงสุด
+// Use Vercel's Edge Runtime for optimal performance
 export const config = {
   runtime: 'edge',
 };
 
 import { neon } from '@neondatabase/serverless';
 
-// ตั้งค่า CORS Headers
+// Define CORS Headers to allow your React App to call this API
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app',
+  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // <-- Your React App's URL
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// --- [เพิ่มใหม่] ฟังก์ชันสำหรับบันทึก Log โดยเฉพาะ ---
-// แยกเป็นฟังก์ชันเพื่อให้โค้ดหลักสะอาดและนำไปใช้ซ้ำได้ง่าย
+/**
+ * A dedicated function to save login logs.
+ * This keeps the main handler clean and handles logging errors gracefully.
+ * @param {object} sql - The neon sql instance.
+ * @param {object} logData - The data to be logged.
+ */
 async function saveLoginLog(sql, logData) {
   const { userId, provider, ipAddress, userAgent, status } = logData;
   try {
@@ -26,28 +30,33 @@ async function saveLoginLog(sql, logData) {
         (${userId}, 'LOGIN', ${provider}, ${ipAddress}, ${userAgent}, ${status});
     `;
   } catch (logError) {
-    // หากการบันทึก log ผิดพลาด ให้แค่แสดง error ใน console
-    // แต่ไม่ต้องทำให้ request หลักล่มไปด้วย
+    // If logging fails, just log the error to the console
+    // but do not crash the main API request.
     console.error("Failed to save log:", logError);
   }
 }
 
-// ฟังก์ชันหลักของ API
+// The main API handler function
 export default async function handler(req) {
+  // Respond to the 'OPTIONS' (Preflight) request sent by browsers to check CORS
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
+  // --- Main logic for HTTP POST (when a user logs in) ---
   if (req.method === 'POST') {
-    // --- [เพิ่มใหม่] ดึงข้อมูล IP และ User-Agent จาก Request ---
+    // Get the user's real IP address from the x-forwarded-for header
     const forwarded = req.headers.get('x-forwarded-for');
     const ipAddress = forwarded ? forwarded.split(',')[0].trim() : null;
     
-    const userAgent = req.headers.get('user-agent') || null; // .get() เป็นวิธีมาตรฐานของ Headers API
+    // Get the user's browser/device information
+    const userAgent = req.headers.get('user-agent') || null;
     
-    let email, provider; // ประกาศตัวแปรไว้นอก try เพื่อใช้ใน catch ได้
+    // Declare variables outside the try block to use them in the catch block
+    let email, provider;
 
     try {
+      // 1. Get user data sent from the frontend
       const body = await req.json();
       email = body.email;
       provider = body.provider;
@@ -55,20 +64,29 @@ export default async function handler(req) {
       
       const sql = neon(process.env.DATABASE_URL);
 
+      // 2. Check if a user with this email already exists
       const existingUser = await sql`SELECT * FROM users WHERE "email" = ${email}`;
 
       if (existingUser.length > 0) {
-        // --- กรณีที่ 1: เจอผู้ใช้ ---
+        // --- Case 1: User exists -> Update their info ---
         const user = existingUser[0];
         const providerExists = user.providers && user.providers.includes(provider);
 
         const updatedUser = await sql`
-            UPDATE users SET "access_token" = ${access_token}, "last_name" = ${last_name}, "first_name" = ${first_name},
-              providers = CASE WHEN ${providerExists} = TRUE THEN providers ELSE array_append(providers, ${provider}) END
-            WHERE "email" = ${email} RETURNING *;
+            UPDATE users SET 
+              "access_token" = ${access_token}, 
+              "last_name" = ${last_name}, 
+              "first_name" = ${first_name},
+              -- Append the new provider to the array only if it doesn't already exist
+              providers = CASE 
+                            WHEN ${providerExists} = TRUE THEN providers 
+                            ELSE array_append(providers, ${provider}) 
+                          END
+            WHERE "email" = ${email} 
+            RETURNING *; -- Return the complete updated user object
           `;
         
-        // --- [เพิ่มใหม่] บันทึก Log หลังจากอัปเดตสำเร็จ ---
+        // Log the successful login event
         await saveLoginLog(sql, {
           userId: updatedUser[0].user_id,
           provider: provider,
@@ -77,20 +95,21 @@ export default async function handler(req) {
           status: 'SUCCESS'
         });
 
+        // Send the updated user data back to the frontend (Status 200 OK)
         return new Response(JSON.stringify(updatedUser[0]), { 
             status: 200, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
 
       } else {
-        // --- กรณีที่ 2: ไม่เจอผู้ใช้ -> สร้างใหม่ ---
+        // --- Case 2: User does not exist -> Create a new one ---
         const newUser = await sql`
           INSERT INTO users ("email", "first_name", "last_name", "access_token", providers) 
           VALUES (${email}, ${first_name}, ${last_name}, ${access_token}, ARRAY[${provider}]) 
-          RETURNING *;
+          RETURNING *; -- Return the complete new user object
         `;
         
-        // --- [เพิ่มใหม่] บันทึก Log หลังจากสร้างผู้ใช้สำเร็จ ---
+        // Log the successful registration/login event
         await saveLoginLog(sql, {
           userId: newUser[0].user_id,
           provider: provider,
@@ -99,6 +118,7 @@ export default async function handler(req) {
           status: 'SUCCESS'
         });
 
+        // Send the new user data back to the frontend (Status 201 Created)
         return new Response(JSON.stringify(newUser[0]), { 
             status: 201, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -106,19 +126,20 @@ export default async function handler(req) {
       }
 
     } catch (error) {
+      // Handle any unexpected errors
       console.error("API Error:", error);
 
-      // --- [เพิ่มใหม่] บันทึก Log กรณีเกิดข้อผิดพลาด ---
-      // เราอาจจะยังไม่มี user_id แต่ยังสามารถบันทึกเหตุการณ์ที่ล้มเหลวได้
+      // Attempt to log the failed login attempt
       const sql = neon(process.env.DATABASE_URL);
       await saveLoginLog(sql, {
-        userId: null, // ไม่มี user_id เพราะการทำงานผิดพลาด
-        provider: provider, // อาจจะได้ค่า provider จาก body ก่อนที่จะเกิด error
+        userId: null, // No user_id because the process failed
+        provider: provider, // We might have the provider info
         ipAddress: ipAddress,
         userAgent: userAgent,
         status: 'FAILED'
       });
 
+      // Return a generic error message
       return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
           status: 500, 
           headers: corsHeaders 
@@ -126,6 +147,7 @@ export default async function handler(req) {
     }
   }
 
+  // Handle any other HTTP methods
   return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
       status: 405, 
       headers: corsHeaders 
