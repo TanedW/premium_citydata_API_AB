@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/organizations.js": {
+    "api/**/*.js": {
       "runtime": "@vercel/node@18.x"
     }
   }
