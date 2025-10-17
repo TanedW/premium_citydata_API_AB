@@ -1,7 +1,7 @@
 {
   "functions": {
-    "api/**/*.js": {
-      "runtime": "edge"
+    "api/organization.js": {
+      "runtime": "nodejs22.x"
     }
   }
 }
