@@ -53,7 +53,7 @@ export default async function handler(req) {
       } else {
         // --- กรณีที่ 2: ยังไม่เคยเชื่อม -> สร้างความสัมพันธ์ใหม่ ---
         const newUserOrgLink = await sql`
-          INSERT INTO user_organizations (user_id, organization_code) 
+          INSERT INTO users_organizations (user_id, organization_code) 
           VALUES (${user_id}, ${organization_code}) 
           RETURNING *; -- ส่งข้อมูลที่เพิ่งสร้างกลับไป
         `;
