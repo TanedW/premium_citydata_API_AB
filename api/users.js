@@ -7,68 +7,96 @@ export const config = {
 
 import { neon } from '@neondatabase/serverless';
 
-// ตั้งค่า CORS Headers สำหรับอนุญาตให้ React App ของคุณเรียกใช้ API นี้ได้
+// ตั้งค่า CORS Headers
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // <-- URL ของ React App ของคุณ
+  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+// --- [เพิ่มใหม่] ฟังก์ชันสำหรับบันทึก Log โดยเฉพาะ ---
+// แยกเป็นฟังก์ชันเพื่อให้โค้ดหลักสะอาดและนำไปใช้ซ้ำได้ง่าย
+async function saveLoginLog(sql, logData) {
+  const { userId, provider, ipAddress, userAgent, status } = logData;
+  try {
+    await sql`
+      INSERT INTO user_logs 
+        (user_id, action_type, provider, ip_address, user_agent, status)
+      VALUES
+        (${userId}, 'LOGIN', ${provider}, ${ipAddress}, ${userAgent}, ${status});
+    `;
+  } catch (logError) {
+    // หากการบันทึก log ผิดพลาด ให้แค่แสดง error ใน console
+    // แต่ไม่ต้องทำให้ request หลักล่มไปด้วย
+    console.error("Failed to save log:", logError);
+  }
+}
+
 // ฟังก์ชันหลักของ API
 export default async function handler(req) {
-  // ตอบกลับ request แบบ 'OPTIONS' (Preflight) ที่ Browser ส่งมาถามเพื่อเช็ค CORS
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  // --- Logic หลักสำหรับ HTTP POST (เมื่อมีการล็อกอิน) ---
   if (req.method === 'POST') {
+    // --- [เพิ่มใหม่] ดึงข้อมูล IP และ User-Agent จาก Request ---
+    const ipAddress = req.ip || 'N/A'; // req.ip ใช้งานได้ใน Vercel Edge Runtime
+    const userAgent = req.headers.get('user-agent') || 'N/A'; // .get() เป็นวิธีมาตรฐานของ Headers API
+    
+    let email, provider; // ประกาศตัวแปรไว้นอก try เพื่อใช้ใน catch ได้
+
     try {
-      // 1. รับข้อมูลผู้ใช้ที่ล็อกอินสำเร็จจาก Frontend
-      const { email, first_name, last_name, provider, access_token } = await req.json();
+      const body = await req.json();
+      email = body.email;
+      provider = body.provider;
+      const { first_name, last_name, access_token } = body;
+      
       const sql = neon(process.env.DATABASE_URL);
 
-      // 2. ค้นหาในฐานข้อมูลว่ามีผู้ใช้ที่ใช้อีเมลนี้อยู่แล้วหรือไม่
       const existingUser = await sql`SELECT * FROM users WHERE "email" = ${email}`;
 
-      // 3. ตรวจสอบผลลัพธ์การค้นหา
       if (existingUser.length > 0) {
-        // --- กรณีที่ 1: เจอผู้ใช้ (อีเมลซ้ำ) -> ทำการอัปเดตและรวมบัญชี ---
+        // --- กรณีที่ 1: เจอผู้ใช้ ---
         const user = existingUser[0];
-
-        // ตรวจสอบว่า provider ที่เข้ามาใหม่ เคยผูกกับบัญชีนี้แล้วหรือยัง
         const providerExists = user.providers && user.providers.includes(provider);
 
         const updatedUser = await sql`
-            UPDATE users 
-            SET 
-              "access_token" = ${access_token}, 
-              "last_name" = ${last_name}, 
-              "first_name" = ${first_name},
-              -- ถ้ายังไม่มี provider นี้ ให้เพิ่มเข้าไปใน Array, ถ้ามีแล้วให้คงเดิม
-              providers = CASE 
-                            WHEN ${providerExists} = TRUE THEN providers 
-                            ELSE array_append(providers, ${provider}) 
-                          END
-            WHERE "email" = ${email} 
-            RETURNING *;
+            UPDATE users SET "access_token" = ${access_token}, "last_name" = ${last_name}, "first_name" = ${first_name},
+              providers = CASE WHEN ${providerExists} = TRUE THEN providers ELSE array_append(providers, ${provider}) END
+            WHERE "email" = ${email} RETURNING *;
           `;
         
-        // ส่งข้อมูลผู้ใช้ที่อัปเดตแล้วกลับไป (Status 200 OK)
+        // --- [เพิ่มใหม่] บันทึก Log หลังจากอัปเดตสำเร็จ ---
+        await saveLoginLog(sql, {
+          userId: updatedUser[0].user_id,
+          provider: provider,
+          ipAddress: ipAddress,
+          userAgent: userAgent,
+          status: 'SUCCESS'
+        });
+
         return new Response(JSON.stringify(updatedUser[0]), { 
             status: 200, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
 
       } else {
-        // --- กรณีที่ 2: ไม่เจอผู้ใช้ -> สร้างผู้ใช้ใหม่ ---
+        // --- กรณีที่ 2: ไม่เจอผู้ใช้ -> สร้างใหม่ ---
         const newUser = await sql`
           INSERT INTO users ("email", "first_name", "last_name", "access_token", providers) 
           VALUES (${email}, ${first_name}, ${last_name}, ${access_token}, ARRAY[${provider}]) 
           RETURNING *;
         `;
         
-        // ส่งข้อมูลผู้ใช้ใหม่กลับไป (Status 201 Created)
+        // --- [เพิ่มใหม่] บันทึก Log หลังจากสร้างผู้ใช้สำเร็จ ---
+        await saveLoginLog(sql, {
+          userId: newUser[0].user_id,
+          provider: provider,
+          ipAddress: ipAddress,
+          userAgent: userAgent,
+          status: 'SUCCESS'
+        });
+
         return new Response(JSON.stringify(newUser[0]), { 
             status: 201, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -76,8 +104,19 @@ export default async function handler(req) {
       }
 
     } catch (error) {
-      // กรณีเกิดข้อผิดพลาดในการเชื่อมต่อหรือคำสั่ง SQL
       console.error("API Error:", error);
+
+      // --- [เพิ่มใหม่] บันทึก Log กรณีเกิดข้อผิดพลาด ---
+      // เราอาจจะยังไม่มี user_id แต่ยังสามารถบันทึกเหตุการณ์ที่ล้มเหลวได้
+      const sql = neon(process.env.DATABASE_URL);
+      await saveLoginLog(sql, {
+        userId: null, // ไม่มี user_id เพราะการทำงานผิดพลาด
+        provider: provider, // อาจจะได้ค่า provider จาก body ก่อนที่จะเกิด error
+        ipAddress: ipAddress,
+        userAgent: userAgent,
+        status: 'FAILED'
+      });
+
       return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
           status: 500, 
           headers: corsHeaders 
@@ -85,7 +124,6 @@ export default async function handler(req) {
     }
   }
 
-  // หากมีการเรียกด้วย Method อื่นที่ไม่ใช่ POST หรือ OPTIONS
   return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
       status: 405, 
       headers: corsHeaders 
