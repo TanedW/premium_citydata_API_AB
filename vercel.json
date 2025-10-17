@@ -1,7 +1,7 @@
 {
   "functions": {
-    "api/organization.js": {
-      "runtime": "nodejs18.x"
+    "api/organizations.js": {
+      "runtime": "@vercel/node@18.x"
     }
   }
 }
