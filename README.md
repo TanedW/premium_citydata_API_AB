@@ -7,7 +7,7 @@ Diagram
 
 erDiagram
     users {
-        int id PK "User ID"
+        int user_id PK "User ID"
         string email
         string first_name
         string last_name
@@ -39,9 +39,11 @@ erDiagram
         timestamp joined_at
     }
 
-    users ||--|{ user_organizations : "can belong to"
-    organizations ||--|{ user_organizations : "can have"
-    users ||--|{ user_logs : "has"
+    users ||--|{ user_organizations : ""
+    user_logs ||--|{ users : ""
+    organizations ||--|{ user_organizations : ""
+
+
 คำอธิบายตาราง (Entities)
 1. users
 ตารางสำหรับเก็บข้อมูลผู้ใช้งานในระบบ
