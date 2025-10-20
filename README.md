@@ -36,9 +36,9 @@ erDiagram
         timestamp joined_at
     }
 
-    users ||--|{ user_organizations : "has"
+    users ||--|{ users_organizations : "has"
     users }|--|| user_logs : "logs"
-    organizations ||--|{ user_organizations : "has"
+    organizations ||--|{ users_organizations : "has"
 ```
 
 คำอธิบายตาราง (Entities)
