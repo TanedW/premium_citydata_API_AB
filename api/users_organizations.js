@@ -11,7 +11,7 @@ import { neon } from '@neondatabase/serverless';
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', // <-- เพิ่ม GET
-  'Access-Control-Allow-Headers': 'Content-Type', Authorization,
+  'Access-Control-Allow-Headers': 'Content-Type , Authorization',
 };
 
 // ฟังก์ชันหลักของ API
