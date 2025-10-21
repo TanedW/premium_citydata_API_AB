@@ -7,21 +7,69 @@ export const config = {
 
 import { neon } from '@neondatabase/serverless';
 
-// ตั้งค่า CORS Headers
+// ตั้งค่า CORS Headers (อัปเดต: เพิ่ม 'GET' ใน Allow-Methods)
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // <-- URL ของ React App
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', // <-- เพิ่ม GET
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
 // ฟังก์ชันหลักของ API
 export default async function handler(req) {
+  
   // ตอบกลับ request แบบ 'OPTIONS' (Preflight)
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  // --- Logic หลักสำหรับ HTTP POST (เมื่อต้องการเชื่อม User กับ Organization) ---
+  // --- Logic ใหม่สำหรับ HTTP GET (เมื่อต้องการดึงข้อมูล) ---
+  if (req.method === 'GET') {
+    try {
+      const sql = neon(process.env.DATABASE_URL);
+      
+      // Vercel Edge Functions ต้องใช้ new URL เพื่อแยก query params
+      // เราสร้าง URL จำลองเพื่อให้ .searchParams ทำงานได้ถูกต้อง
+      const requestUrl = new URL(req.url, `http://${req.headers.get('host')}`);
+      const user_id = requestUrl.searchParams.get('user_id');
+      const organization_code = requestUrl.searchParams.get('organization_code');
+
+      let queryResult;
+
+      if (user_id) {
+        // --- Case 1: ค้นหาทุก organization ที่ user คนนี้อยู่ ---
+        queryResult = await sql`
+          SELECT * FROM users_organizations WHERE "user_id" = ${user_id};
+        `;
+      } else if (organization_code) {
+        // --- Case 2: ค้นหาทุก user ที่อยู่ใน organization นี้ ---
+        queryResult = await sql`
+          SELECT * FROM users_organizations WHERE "organization_code" = ${organization_code};
+        `;
+      } else {
+        // --- Case 3: ไม่ได้ระบุ parameter ที่ถูกต้อง ---
+        return new Response(JSON.stringify({ message: 'A query parameter (user_id or organization_code) is required' }), { 
+            status: 400, // Bad Request
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // --- ส่งข้อมูลที่ค้นหาเจอ (Status 200 OK) ---
+      // queryResult จะเป็น array เสมอ (อาจจะว่าง ถ้าไม่เจอ)
+      return new Response(JSON.stringify(queryResult), { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+
+    } catch (error) {
+      console.error("API Error (GET):", error);
+      return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+  }
+
+  // --- Logic เดิมสำหรับ HTTP POST (เมื่อต้องการเชื่อม User กับ Organization) ---
   if (req.method === 'POST') {
     try {
       // 1. รับข้อมูล user_id และ organization_code จาก Frontend
@@ -67,7 +115,7 @@ export default async function handler(req) {
 
     } catch (error) {
       // กรณีเกิดข้อผิดพลาด, อาจจะเกิดจาก user_id หรือ organization_code ไม่มีอยู่จริง (Foreign Key constraint)
-      console.error("API Error:", error);
+      console.error("API Error (POST):", error);
       
       // ตรวจสอบ error code เฉพาะของ PostgreSQL สำหรับ Foreign Key Violation
       if (error.code === '23503') { // 23503 คือรหัส lỗi ของ foreign_key_violation
@@ -85,7 +133,7 @@ export default async function handler(req) {
     }
   }
 
-  // หากมีการเรียกด้วย Method อื่น
+  // หากมีการเรียกด้วย Method อื่น (เช่น PUT, DELETE)
   return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
       status: 405, 
       headers: corsHeaders 
