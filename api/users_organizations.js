@@ -38,12 +38,12 @@ export default async function handler(req) {
       if (user_id) {
         // --- Case 1: ค้นหาทุก organization ที่ user คนนี้อยู่ ---
         queryResult = await sql`
-          SELECT * FROM users_organizations WHERE "user_id" = ${user_id};
+          SELECT * FROM view_user_org_details WHERE "user_id" = ${user_id};
         `;
       } else if (organization_code) {
         // --- Case 2: ค้นหาทุก user ที่อยู่ใน organization นี้ ---
         queryResult = await sql`
-          SELECT * FROM users_organizations WHERE "organization_code" = ${organization_code};
+          SELECT * FROM view_user_org_details WHERE "organization_code" = ${organization_code};
         `;
       } else {
         // --- Case 3: ไม่ได้ระบุ parameter ที่ถูกต้อง ---
