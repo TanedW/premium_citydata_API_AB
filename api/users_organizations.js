@@ -7,7 +7,7 @@ export const config = {
 
 import { neon } from '@neondatabase/serverless';
 
-// ตั้งค่า CORS Headers
+// ตั้งค่า CORS Headers (สำคัญ: ต้องมี Authorization)
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -36,10 +36,17 @@ async function saveLoginLog(sql, logData) {
 // ฟังก์ชันหลักของ API
 export default async function handler(req) {
   
+  // --- (ส่วนที่แก้ไขล่าสุด) ---
   // ตอบกลับ request แบบ 'OPTIONS' (Preflight)
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders });
+    console.log("OPTIONS request received, sending 200 OK"); // <-- เพิ่ม Log
+    return new Response(null, { 
+        status: 200, // <-- เปลี่ยนเป็น 200
+        headers: corsHeaders 
+    });
   }
+  // --- (จบส่วนที่แก้ไข) ---
+
 
   // --- Logic สำหรับ HTTP GET (เมื่อต้องการดึงข้อมูล) ---
   if (req.method === 'GET') {
@@ -108,13 +115,13 @@ export default async function handler(req) {
 
       sql = neon(process.env.DATABASE_URL);
 
-      // --- ADDED: 1.5 ดึง Provider ล่าสุดที่ใช้ Login จากตาราง logs ---
+      // --- 1.5 ดึง Provider ล่าสุดที่ใช้ Login จากตาราง logs ---
       try {
         const lastLoginLog = await sql`
           SELECT provider 
           FROM user_logs 
           WHERE "user_id" = ${user_id} AND "action_type" = 'LOGIN'
-          ORDER BY "created_at" DESC -- (สำคัญ: ต้องมีคอลัมน์ timestamp เช่น created_at)
+          ORDER BY "created_at" DESC
           LIMIT 1;
         `;
         
@@ -133,30 +140,28 @@ export default async function handler(req) {
         WHERE "user_id" = ${user_id} AND "organization_code" = ${organization_code}
       `;
 
-      // 3. ถ้าเจอข้อมูล (array มีสมาชิกมากกว่า 0) แสดงว่าเคยเชื่อมกันแล้ว
+      // 3. ถ้าเจอข้อมูลซ้ำ
       if (existingLink.length > 0) {
-        // --- กรณีที่ 1: ข้อมูลซ้ำ ---
         return new Response(JSON.stringify({ message: 'User is already in this organization' }), { 
-            status: 409, // Conflict - ข้อมูลนี้มีอยู่แล้ว
+            status: 409, // Conflict
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       } else {
-        // --- กรณีที่ 2: ยังไม่เคยเชื่อม -> สร้างความสัมพันธ์ใหม่ ---
+        // 4. ถ้าไม่ซ้ำ -> สร้างความสัมพันธ์ใหม่
         const newUserOrgLink = await sql`
           INSERT INTO users_organizations (user_id, organization_code) 
           VALUES (${user_id}, ${organization_code}) 
-          RETURNING *; -- ส่งข้อมูลที่เพิ่งสร้างกลับไป
+          RETURNING *;
         `;
         
         // --- บันทึก Log (Success) ---
         const logDataSuccess = {
           userId: user_id,
-          provider: currentProvider, // <-- ใช้ provider ที่หามาได้
+          provider: currentProvider,
           ipAddress: req.headers.get('x-forwarded-for') || null,
           userAgent: req.headers.get('user-agent') || null,
           status: 'SUCCESS'
         };
-        // เรียกแบบ "fire-and-forget" (ไม่ต้อง await)
         saveLoginLog(sql, logDataSuccess);
         
         // ส่งข้อมูลใหม่กลับไป (Status 201 Created)
@@ -171,23 +176,21 @@ export default async function handler(req) {
       console.error("API Error (POST):", error);
       
       // --- บันทึก Log (Failure) ---
-      // ตรวจสอบว่า sql และ user_id ถูกกำหนดค่าแล้วหรือยัง
       if (sql && user_id) {
           const logDataFailure = {
               userId: user_id,
-              provider: currentProvider, // <-- ใช้ provider ที่หามาได้
+              provider: currentProvider,
               ipAddress: req.headers.get('x-forwarded-for') || null,
               userAgent: req.headers.get('user-agent') || null,
               status: 'FAILURE'
           };
-          // เรียกแบบ "fire-and-forget"
           saveLoginLog(sql, logDataFailure);
       }
       
-      // ตรวจสอบ error code เฉพาะของ PostgreSQL สำหรับ Foreign Key Violation
-      if (error.code === '23503') { // 23503 คือรหัส lỗi ของ foreign_key_violation
+      // ตรวจสอบ error code เฉพาะของ PostgreSQL
+      if (error.code === '23503') { // Foreign Key Violation
         return new Response(JSON.stringify({ message: 'Invalid user_id or organization_code' }), { 
-            status: 404, // Not Found - เพราะหา user หรือ org ไม่เจอ
+            status: 404, // Not Found
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
