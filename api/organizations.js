@@ -12,7 +12,7 @@ const corsHeaders = {
   // **สำคัญ:** อย่าลืมเปลี่ยนเป็น URL ของ React App ของคุณ
   'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', 
   'Access-Control-Allow-Methods': 'POST, OPTIONS', // อนุญาตเฉพาะ POST และ OPTIONS
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 // ฟังก์ชันหลักของ API
