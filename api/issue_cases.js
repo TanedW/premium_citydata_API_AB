@@ -34,23 +34,7 @@ function generateCaseCode() {
   return `${year}-${randomDigits}${randomLetters}`;
 }
 
-/**
- * ฟังก์ชันสำหรับบันทึก Log การสร้างเคสใหม่
- */
-async function saveCaseStatusLog(sql, logData) {
-  const { caseId, newStatus, comment, userId } = logData; 
-  try {
-    await sql`
-      INSERT INTO case_status_logs 
-        (case_id, old_status, new_status, comment, changed_by_user_id)
-      VALUES
-        (${caseId}, NULL, ${newStatus}, ${comment}, ${userId});
-    `;
-  } catch (logError) {
-    console.error("Failed to save case status log:", logError.message);
-    throw new Error(`Log saving failed: ${logError.message}`); 
-  }
-}
+// --- (!!! ลบฟังก์ชัน saveCaseStatusLog ทิ้งไป !!!) ---
 
 
 // The main API handler function
@@ -64,7 +48,6 @@ export default async function handler(req) {
 
   // --- 2. Main logic for HTTP GET (ดึงเคสทั้งหมด) ---
   if (req.method === 'GET') {
-    // ... (ส่วนนี้เหมือนเดิมครับ) ...
     try {
       const cases = await sql`
         SELECT * FROM issue_cases 
@@ -122,7 +105,7 @@ export default async function handler(req) {
         validUserId = user_id;
       }
       
-      // 3.3. ตรรกะ "สุ่มแล้วเช็ก" ... (ส่วนนี้เหมือนเดิม) ...
+      // 3.3. ตรรกะ "สุ่มแล้วเช็ก"
       let newCase = null;
       let attempts = 0;
       const MAX_ATTEMPTS = 5;
@@ -134,7 +117,7 @@ export default async function handler(req) {
           // 3.4. !!! เริ่ม Transaction !!!
           const result = await sql.transaction(async (tx) => {
             
-            // Step 1: สร้างเคสหลัก (เหมือนเดิม)
+            // Step 1: สร้างเคสหลัก
             const insertedCase = await tx`
               INSERT INTO issue_cases (
                 case_code, title, description, cover_image_url, 
@@ -149,11 +132,8 @@ export default async function handler(req) {
             const newCaseData = insertedCase[0];
             const newCaseId = newCaseData.issue_cases_id;
 
-            // --- (!!! จุดที่แก้ไข !!!) ---
-            // Step 2: (ถ้ามี) บันทึกไฟล์มีเดียลงใน `case_media` (เปลี่ยนเป็น for...of loop)
+            // Step 2: (ถ้ามี) บันทึกไฟล์มีเดีย
             if (media_files && media_files.length > 0) {
-              
-              // ใช้ for...of loop เพื่อ INSERT ทีละไฟล์ (เสถียรกว่า)
               for (const file of media_files) {
                 await tx`
                   INSERT INTO case_media (case_id, media_type, url)
@@ -161,35 +141,43 @@ export default async function handler(req) {
                 `;
               }
             }
-            // --- (!!! จบจุดที่แก้ไข !!!) ---
 
-            // Step 3: บันทึกประวัติการสร้างลงใน `case_status_logs`
-            await saveCaseStatusLog(tx, {
-              caseId: newCaseId,
-              newStatus: newCaseData.status,
-              comment: 'สร้างเคสใหม่',
-              userId: validUserId 
-            });
+            // --- (!!! จุดที่แก้ไข !!!) ---
+            // Step 3: บันทึกประวัติการสร้างลงใน `case_status_logs` (ย้ายโค้ดมาไว้ตรงนี้)
+            try {
+              await tx`
+                INSERT INTO case_status_logs 
+                  (case_id, old_status, new_status, comment, changed_by_user_id)
+                VALUES
+                  (${newCaseId}, NULL, ${newCaseData.status}, 'สร้างเคสใหม่', ${validUserId});
+              `;
+            } catch (logError) {
+              console.error("Failed to save case status log:", logError.message);
+              // โยน Error เพื่อให้ Transaction ทั้งหมด Rollback
+              throw new Error(`Log saving failed: ${logError.message}`); 
+            }
+            // --- (!!! จบจุดที่แก้ไข !!!) ---
 
             // Step 4: ส่งข้อมูลเคสที่สร้างเสร็จ ออกจาก Transaction
             return newCaseData;
           });
           
           newCase = result;
-          break; 
+          break; // ถ้า Transaction สำเร็จ ให้ออกจาก Loop
 
         } catch (err) {
-          // ... (ส่วน Error Handling เหมือนเดิม) ...
+          // ตรวจสอบว่า Error เกิดจาก 'unique constraint' (รหัสซ้ำ) หรือไม่
           if (err.message && err.message.includes('unique constraint') && err.message.includes('issue_cases_case_code_key')) {
             attempts++;
             console.warn(`Case code collision: ${caseCode}. Retrying...`);
           } else {
+            // ถ้าเป็น Error อื่น (เช่น issue_type_id ผิด, หรือ log พัง) ให้โยน Error ออกไปเลย
             throw err;
           }
         }
       } // จบ while loop
 
-      // 3.5. ตรวจสอบผลลัพธ์ (เหมือนเดิม)
+      // 3.5. ตรวจสอบผลลัพธ์
       if (newCase) {
         return new Response(JSON.stringify(newCase), { 
             status: 201, 
@@ -200,7 +188,7 @@ export default async function handler(req) {
       }
 
     } catch (error) {
-      // 3.6. จัดการ Error ทั้งหมด (เหมือนเดิม)
+      // 3.6. จัดการ Error ทั้งหมด
       console.error("API Error (POST):", error);
       return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
           status: 500, 
@@ -215,3 +203,4 @@ export default async function handler(req) {
       headers: corsHeaders 
   });
 }
+
