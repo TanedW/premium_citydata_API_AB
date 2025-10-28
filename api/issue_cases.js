@@ -10,7 +10,7 @@ import { neon } from '@neondatabase/serverless';
 // Define CORS Headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // URL ของ React App
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', // อนุญาต GET และ POST
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -36,10 +36,9 @@ function generateCaseCode() {
 
 /**
  * ฟังก์ชันสำหรับบันทึก Log การสร้างเคสใหม่
- * (ถูกเรียกใช้ภายใน Transaction)
  */
 async function saveCaseStatusLog(sql, logData) {
-  // changed_by_user_id เป็น integer ตามสคีมา
+  // userId สามารถเป็น null ได้
   const { caseId, newStatus, comment, userId } = logData; 
   try {
     await sql`
@@ -49,10 +48,7 @@ async function saveCaseStatusLog(sql, logData) {
         (${caseId}, NULL, ${newStatus}, ${comment}, ${userId});
     `;
   } catch (logError) {
-    // ถ้าบันทึก log ไม่ได้ ก็แค่ log error ไว้ แต่ไม่ทำให้ API ล่ม
-    // (แต่ถ้าอยู่ใน Transaction มันจะทำให้ Transaction ล่ม ซึ่งถูกต้องแล้ว)
     console.error("Failed to save case status log:", logError.message);
-    // โยน Error ต่อเพื่อให้ Transaction รับรู้และ Rollback
     throw new Error(`Log saving failed: ${logError.message}`); 
   }
 }
@@ -69,19 +65,17 @@ export default async function handler(req) {
 
   // --- 2. Main logic for HTTP GET (ดึงเคสทั้งหมด) ---
   if (req.method === 'GET') {
+    // ... (ส่วนนี้เหมือนเดิมครับ) ...
     try {
-      // ดึงเคส 50 รายการล่าสุด
       const cases = await sql`
         SELECT * FROM issue_cases 
         ORDER BY created_at DESC 
         LIMIT 50;
       `;
-      
       return new Response(JSON.stringify(cases), { 
           status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
-
     } catch (error) {
       console.error("API Error (GET):", error);
       return new Response(JSON.stringify({ message: 'Database query failed', error: error.message }), { 
@@ -91,7 +85,7 @@ export default async function handler(req) {
     }
   }
 
-  // --- 3. Main logic for HTTP POST (สร้างเคสใหม่ - แบบ All-in-One) ---
+  // --- 3. Main logic for HTTP POST (สร้างเคสใหม่) ---
   if (req.method === 'POST') {
     let body; 
     
@@ -106,27 +100,33 @@ export default async function handler(req) {
         latitude,
         longitude,
         tags,
-        media_files, // <-- (ใหม่!) Array ของไฟล์มีเดีย
-        user_id      // <-- (ใหม่!) ID ของผู้ใช้ที่สร้าง (integer)
+        media_files,
+        user_id // <-- (Optional) อาจจะเป็น null หรือ undefined
       } = body;
       
       // 3.2. ตรวจสอบข้อมูลจำเป็น
-      // (สำคัญ!) เราเพิ่ม user_id เข้าไปในการตรวจสอบ
-      if (!title || !issue_type_id || !latitude || !longitude || !user_id) {
-        return new Response(JSON.stringify({ message: 'Missing required fields: title, issue_type_id, latitude, longitude, and user_id are required.' }), {
+      // (!!! แก้ไข !!!) เอา user_id ออกจากช่องบังคับ
+      if (!title || !issue_type_id || !latitude || !longitude) {
+        return new Response(JSON.stringify({ message: 'Missing required fields: title, issue_type_id, latitude, and longitude are required.' }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
       
-      if (typeof user_id !== 'number' || !Number.isInteger(user_id)) {
-         return new Response(JSON.stringify({ message: 'Invalid user_id: Must be an integer.' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+      // (!!! ใหม่ !!!) ตรวจสอบ user_id "ถ้ามี"
+      let validUserId = null; // Default เป็น null
+      if (user_id !== null && user_id !== undefined) {
+        // ถ้ามี user_id ส่งมา แต่ไม่ใช่ตัวเลข
+        if (typeof user_id !== 'number' || !Number.isInteger(user_id)) {
+           return new Response(JSON.stringify({ message: 'Invalid user_id: If provided, must be an integer.' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        validUserId = user_id; // ถ้าถูกต้อง ก็ใช้ค่านั้น
       }
-
-      // 3.3. ตรรกะ "สุ่มแล้วเช็ก" (Random + Check)
+      
+      // 3.3. ตรรกะ "สุ่มแล้วเช็ก" ... (ส่วนนี้เหมือนเดิม) ...
       let newCase = null;
       let attempts = 0;
       const MAX_ATTEMPTS = 5;
@@ -135,11 +135,10 @@ export default async function handler(req) {
         const caseCode = generateCaseCode();
         
         try {
-          // 3.4. !!! เริ่ม Transaction (สำคัญที่สุด) !!!
-          // ทำทุกอย่างในนี้ (สร้างเคส, บันทึกมีเดีย, บันทึก Log)
+          // 3.4. !!! เริ่ม Transaction !!!
           const result = await sql.transaction(async (tx) => {
             
-            // Step 1: สร้างเคสหลักใน `issue_cases`
+            // Step 1: สร้างเคสหลัก (เหมือนเดิม)
             const insertedCase = await tx`
               INSERT INTO issue_cases (
                 case_code, title, description, cover_image_url, 
@@ -154,61 +153,52 @@ export default async function handler(req) {
             const newCaseData = insertedCase[0];
             const newCaseId = newCaseData.issue_cases_id;
 
-            // Step 2: (ถ้ามี) บันทึกไฟล์มีเดียลงใน `case_media`
+            // Step 2: บันทึกไฟล์มีเดีย (เหมือนเดิม)
             if (media_files && media_files.length > 0) {
-              
-              // สร้าง Query สำหรับ media ทั้งหมด
               const mediaQueries = media_files.map(file => tx`
                 INSERT INTO case_media (case_id, media_type, url)
                 VALUES (${newCaseId}, ${file.media_type}, ${file.url})
               `);
-              
-              // รันทุก Query พร้อมกัน
               await Promise.all(mediaQueries);
             }
 
-            // Step 3: บันทึกประวัติการสร้างลงใน `case_status_logs`
+            // Step 3: (!!! แก้ไข !!!) บันทึกประวัติการสร้าง
             await saveCaseStatusLog(tx, {
               caseId: newCaseId,
-              newStatus: newCaseData.status, // ดึงสถานะ default ('รอรับเรื่อง')
+              newStatus: newCaseData.status,
               comment: 'สร้างเคสใหม่',
-              userId: user_id // ส่ง user_id (integer) เข้าไป
+              userId: validUserId // <-- (ใหม่!) ส่ง ID ที่ตรวจสอบแล้ว (ซึ่งอาจจะเป็น null)
             });
 
-            // Step 4: ส่งข้อมูลเคสที่สร้างเสร็จ ออกจาก Transaction
             return newCaseData;
           });
           
           newCase = result;
-          break; // ถ้า Transaction สำเร็จ ให้ออกจาก Loop
+          break; 
 
         } catch (err) {
-          // ตรวจสอบว่า Error เกิดจาก 'unique constraint' (รหัสซ้ำ) หรือไม่
+          // ... (ส่วน Error Handling เหมือนเดิม) ...
           if (err.message && err.message.includes('unique constraint') && err.message.includes('issue_cases_case_code_key')) {
             attempts++;
             console.warn(`Case code collision: ${caseCode}. Retrying...`);
-            // Loop จะวนกลับไปสุ่มใหม่
           } else {
-            // ถ้าเป็น Error อื่น (เช่น issue_type_id ผิด, หรือ log พัง) ให้โยน Error ออกไปเลย
             throw err;
           }
         }
       } // จบ while loop
 
-      // 3.5. ตรวจสอบผลลัพธ์
+      // 3.5. ตรวจสอบผลลัพธ์ (เหมือนเดิม)
       if (newCase) {
-        // --- สำเร็จ ---
         return new Response(JSON.stringify(newCase), { 
             status: 201, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       } else {
-        // --- ล้มเหลว (พยายาม 5 ครั้งแล้วยังซ้ำ) ---
         throw new Error(`Failed to generate unique case code after ${MAX_ATTEMPTS} attempts.`);
       }
 
     } catch (error) {
-      // 3.6. จัดการ Error ทั้งหมด
+      // 3.6. จัดการ Error ทั้งหมด (เหมือนเดิม)
       console.error("API Error (POST):", error);
       return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
           status: 500, 
