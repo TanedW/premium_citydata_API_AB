@@ -38,7 +38,6 @@ function generateCaseCode() {
  * ฟังก์ชันสำหรับบันทึก Log การสร้างเคสใหม่
  */
 async function saveCaseStatusLog(sql, logData) {
-  // userId สามารถเป็น null ได้
   const { caseId, newStatus, comment, userId } = logData; 
   try {
     await sql`
@@ -101,11 +100,10 @@ export default async function handler(req) {
         longitude,
         tags,
         media_files,
-        user_id // <-- (Optional) อาจจะเป็น null หรือ undefined
+        user_id // (Optional)
       } = body;
       
       // 3.2. ตรวจสอบข้อมูลจำเป็น
-      // (!!! แก้ไข !!!) เอา user_id ออกจากช่องบังคับ
       if (!title || !issue_type_id || !latitude || !longitude) {
         return new Response(JSON.stringify({ message: 'Missing required fields: title, issue_type_id, latitude, and longitude are required.' }), {
           status: 400,
@@ -113,17 +111,15 @@ export default async function handler(req) {
         });
       }
       
-      // (!!! ใหม่ !!!) ตรวจสอบ user_id "ถ้ามี"
-      let validUserId = null; // Default เป็น null
+      let validUserId = null; 
       if (user_id !== null && user_id !== undefined) {
-        // ถ้ามี user_id ส่งมา แต่ไม่ใช่ตัวเลข
         if (typeof user_id !== 'number' || !Number.isInteger(user_id)) {
            return new Response(JSON.stringify({ message: 'Invalid user_id: If provided, must be an integer.' }), {
             status: 400,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
         }
-        validUserId = user_id; // ถ้าถูกต้อง ก็ใช้ค่านั้น
+        validUserId = user_id;
       }
       
       // 3.3. ตรรกะ "สุ่มแล้วเช็ก" ... (ส่วนนี้เหมือนเดิม) ...
@@ -153,23 +149,29 @@ export default async function handler(req) {
             const newCaseData = insertedCase[0];
             const newCaseId = newCaseData.issue_cases_id;
 
-            // Step 2: บันทึกไฟล์มีเดีย (เหมือนเดิม)
+            // --- (!!! จุดที่แก้ไข !!!) ---
+            // Step 2: (ถ้ามี) บันทึกไฟล์มีเดียลงใน `case_media` (เปลี่ยนเป็น for...of loop)
             if (media_files && media_files.length > 0) {
-              const mediaQueries = media_files.map(file => tx`
-                INSERT INTO case_media (case_id, media_type, url)
-                VALUES (${newCaseId}, ${file.media_type}, ${file.url})
-              `);
-              await Promise.all(mediaQueries);
+              
+              // ใช้ for...of loop เพื่อ INSERT ทีละไฟล์ (เสถียรกว่า)
+              for (const file of media_files) {
+                await tx`
+                  INSERT INTO case_media (case_id, media_type, url)
+                  VALUES (${newCaseId}, ${file.media_type}, ${file.url})
+                `;
+              }
             }
+            // --- (!!! จบจุดที่แก้ไข !!!) ---
 
-            // Step 3: (!!! แก้ไข !!!) บันทึกประวัติการสร้าง
+            // Step 3: บันทึกประวัติการสร้างลงใน `case_status_logs`
             await saveCaseStatusLog(tx, {
               caseId: newCaseId,
               newStatus: newCaseData.status,
               comment: 'สร้างเคสใหม่',
-              userId: validUserId // <-- (ใหม่!) ส่ง ID ที่ตรวจสอบแล้ว (ซึ่งอาจจะเป็น null)
+              userId: validUserId 
             });
 
+            // Step 4: ส่งข้อมูลเคสที่สร้างเสร็จ ออกจาก Transaction
             return newCaseData;
           });
           
