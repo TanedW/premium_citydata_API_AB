@@ -1,4 +1,4 @@
-// /api/issue_cases.js
+// /api/cases.js
 
 // Use Vercel's Edge Runtime
 export const config = {
@@ -16,7 +16,6 @@ const corsHeaders = {
 
 /**
  * ฟังก์ชันสำหรับสุ่มรหัสเคส (YYYY-NNNAAA)
- * (แยกออกมาเพื่อความสะอาด)
  */
 function generateCaseCode() {
   const year = new Date().getFullYear();
@@ -37,21 +36,24 @@ function generateCaseCode() {
 
 /**
  * ฟังก์ชันสำหรับบันทึก Log การสร้างเคสใหม่
- * (แยกออกมาเหมือนกับ saveLoginLog ของคุณ)
+ * (ถูกเรียกใช้ภายใน Transaction)
  */
 async function saveCaseStatusLog(sql, logData) {
-  const { caseId, newStatus, comment } = logData;
+  // changed_by_user_id เป็น integer ตามสคีมา
+  const { caseId, newStatus, comment, userId } = logData; 
   try {
-    // หมายเหตุ: เราไม่ได้ใส่ changed_by_user_id เพราะสคีมาของคุณไม่มี user_id ในเคส
     await sql`
       INSERT INTO case_status_logs 
-        (case_id, old_status, new_status, comment)
+        (case_id, old_status, new_status, comment, changed_by_user_id)
       VALUES
-        (${caseId}, NULL, ${newStatus}, ${comment});
+        (${caseId}, NULL, ${newStatus}, ${comment}, ${userId});
     `;
   } catch (logError) {
     // ถ้าบันทึก log ไม่ได้ ก็แค่ log error ไว้ แต่ไม่ทำให้ API ล่ม
+    // (แต่ถ้าอยู่ใน Transaction มันจะทำให้ Transaction ล่ม ซึ่งถูกต้องแล้ว)
     console.error("Failed to save case status log:", logError.message);
+    // โยน Error ต่อเพื่อให้ Transaction รับรู้และ Rollback
+    throw new Error(`Log saving failed: ${logError.message}`); 
   }
 }
 
@@ -63,7 +65,6 @@ export default async function handler(req) {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  // สร้างการเชื่อมต่อ DB
   const sql = neon(process.env.DATABASE_URL);
 
   // --- 2. Main logic for HTTP GET (ดึงเคสทั้งหมด) ---
@@ -76,7 +77,6 @@ export default async function handler(req) {
         LIMIT 50;
       `;
       
-      // ส่งข้อมูลกลับไป (Status 200 OK)
       return new Response(JSON.stringify(cases), { 
           status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -91,9 +91,9 @@ export default async function handler(req) {
     }
   }
 
-  // --- 3. Main logic for HTTP POST (สร้างเคสใหม่) ---
+  // --- 3. Main logic for HTTP POST (สร้างเคสใหม่ - แบบ All-in-One) ---
   if (req.method === 'POST') {
-    let body; // ประกาศไว้นอก try เพื่อใช้ใน catch
+    let body; 
     
     try {
       // 3.1. ดึงข้อมูลที่ส่งมาจาก Frontend
@@ -105,12 +105,22 @@ export default async function handler(req) {
         issue_type_id,
         latitude,
         longitude,
-        tags
+        tags,
+        media_files, // <-- (ใหม่!) Array ของไฟล์มีเดีย
+        user_id      // <-- (ใหม่!) ID ของผู้ใช้ที่สร้าง (integer)
       } = body;
       
       // 3.2. ตรวจสอบข้อมูลจำเป็น
-      if (!title || !issue_type_id || !latitude || !longitude) {
-        return new Response(JSON.stringify({ message: 'Missing required fields' }), {
+      // (สำคัญ!) เราเพิ่ม user_id เข้าไปในการตรวจสอบ
+      if (!title || !issue_type_id || !latitude || !longitude || !user_id) {
+        return new Response(JSON.stringify({ message: 'Missing required fields: title, issue_type_id, latitude, longitude, and user_id are required.' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      
+      if (typeof user_id !== 'number' || !Number.isInteger(user_id)) {
+         return new Response(JSON.stringify({ message: 'Invalid user_id: Must be an integer.' }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
@@ -119,53 +129,75 @@ export default async function handler(req) {
       // 3.3. ตรรกะ "สุ่มแล้วเช็ก" (Random + Check)
       let newCase = null;
       let attempts = 0;
-      const MAX_ATTEMPTS = 5; // กัน Loop วิ่งไม่หยุด
+      const MAX_ATTEMPTS = 5;
 
       while (attempts < MAX_ATTEMPTS) {
-        const caseCode = generateCaseCode(); // สุ่มรหัสใหม่
+        const caseCode = generateCaseCode();
         
         try {
-          // พยายาม INSERT
-          const result = await sql`
-            INSERT INTO issue_cases (
-              case_code, title, description, cover_image_url, 
-              issue_type_id, latitude, longitude, tags
-            ) VALUES (
-              ${caseCode}, ${title}, ${description}, ${cover_image_url}, 
-              ${issue_type_id}, ${latitude}, ${longitude}, ${tags}
-            )
-            RETURNING *; -- ส่งข้อมูลเคสที่สร้างเสร็จกลับมา
-          `;
+          // 3.4. !!! เริ่ม Transaction (สำคัญที่สุด) !!!
+          // ทำทุกอย่างในนี้ (สร้างเคส, บันทึกมีเดีย, บันทึก Log)
+          const result = await sql.transaction(async (tx) => {
+            
+            // Step 1: สร้างเคสหลักใน `issue_cases`
+            const insertedCase = await tx`
+              INSERT INTO issue_cases (
+                case_code, title, description, cover_image_url, 
+                issue_type_id, latitude, longitude, tags
+              ) VALUES (
+                ${caseCode}, ${title}, ${description}, ${cover_image_url}, 
+                ${issue_type_id}, ${latitude}, ${longitude}, ${tags}
+              )
+              RETURNING *;
+            `;
+            
+            const newCaseData = insertedCase[0];
+            const newCaseId = newCaseData.issue_cases_id;
+
+            // Step 2: (ถ้ามี) บันทึกไฟล์มีเดียลงใน `case_media`
+            if (media_files && media_files.length > 0) {
+              
+              // สร้าง Query สำหรับ media ทั้งหมด
+              const mediaQueries = media_files.map(file => tx`
+                INSERT INTO case_media (case_id, media_type, url)
+                VALUES (${newCaseId}, ${file.media_type}, ${file.url})
+              `);
+              
+              // รันทุก Query พร้อมกัน
+              await Promise.all(mediaQueries);
+            }
+
+            // Step 3: บันทึกประวัติการสร้างลงใน `case_status_logs`
+            await saveCaseStatusLog(tx, {
+              caseId: newCaseId,
+              newStatus: newCaseData.status, // ดึงสถานะ default ('รอรับเรื่อง')
+              comment: 'สร้างเคสใหม่',
+              userId: user_id // ส่ง user_id (integer) เข้าไป
+            });
+
+            // Step 4: ส่งข้อมูลเคสที่สร้างเสร็จ ออกจาก Transaction
+            return newCaseData;
+          });
           
-          newCase = result[0];
-          break; // ถ้าสำเร็จ ให้ออกจาก Loop
+          newCase = result;
+          break; // ถ้า Transaction สำเร็จ ให้ออกจาก Loop
 
         } catch (err) {
           // ตรวจสอบว่า Error เกิดจาก 'unique constraint' (รหัสซ้ำ) หรือไม่
-          // (ใน Vercel Edge การเช็ก err.message ปลอดภัยกว่า err.code)
           if (err.message && err.message.includes('unique constraint') && err.message.includes('issue_cases_case_code_key')) {
-            // รหัสซ้ำจริง
             attempts++;
             console.warn(`Case code collision: ${caseCode}. Retrying...`);
             // Loop จะวนกลับไปสุ่มใหม่
           } else {
-            // ถ้าเป็น Error อื่น (เช่น issue_type_id ผิด) ให้โยน Error ออกไปเลย
+            // ถ้าเป็น Error อื่น (เช่น issue_type_id ผิด, หรือ log พัง) ให้โยน Error ออกไปเลย
             throw err;
           }
         }
       } // จบ while loop
 
-      // 3.4. ตรวจสอบผลลัพธ์
+      // 3.5. ตรวจสอบผลลัพธ์
       if (newCase) {
         // --- สำเร็จ ---
-        // 3.5. (สำคัญ) บันทึกประวัติการสร้างเคสใหม่ลงใน `case_status_logs`
-        await saveCaseStatusLog(sql, {
-          caseId: newCase.issue_cases_id,
-          newStatus: newCase.status, // ดึงสถานะ default ('รอรับเรื่อง')
-          comment: 'สร้างเคสใหม่'
-        });
-        
-        // 3.6. ส่งเคสใหม่กลับไป (Status 201 Created)
         return new Response(JSON.stringify(newCase), { 
             status: 201, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -176,7 +208,7 @@ export default async function handler(req) {
       }
 
     } catch (error) {
-      // 3.7. จัดการ Error ทั้งหมด
+      // 3.6. จัดการ Error ทั้งหมด
       console.error("API Error (POST):", error);
       return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
           status: 500, 
