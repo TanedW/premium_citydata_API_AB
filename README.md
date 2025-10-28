@@ -35,10 +35,76 @@ erDiagram
         string role
         timestamp joined_at
     }
+        users {
+        INTEGER user_id PK
+        TEXT username "..."
+    }
+
+    organizations {
+        INTEGER organization_id PK
+        TEXT name "..."
+    }
+
+    issue_types {
+        UUID issue_id PK
+        TEXT name
+        TEXT description
+        TEXT icon_url
+    }
+
+    issue_cases {
+        UUID issue_cases_id PK
+        VARCHAR(11) case_code
+        TEXT title
+        TEXT description
+        TEXT cover_image_url
+        UUID issue_type_id FK
+        case_status status
+        NUMERIC latitude
+        NUMERIC longitude
+        TEXT[] tags
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    case_media {
+        UUID id PK
+        UUID case_id FK
+        media_type media_type
+        TEXT url
+        TIMESTAMPTZ created_at
+    }
+
+    case_organizations {
+        UUID case_id PK, FK
+        INTEGER organization_id PK, FK
+        BOOLEAN is_viewed
+    }
+
+    case_activity_logs {
+        BIGSERIAL log_id PK
+        UUID case_id FK
+        INTEGER changed_by_user_id FK
+        case_activity_type activity_type
+        TEXT old_value
+        TEXT new_value
+        TEXT comment
+        TIMESTAMPTZ created_at
+    }
 
     users ||--|{ users_organizations : "has"
     users }|--|| user_logs : "logs"
     organizations ||--|{ users_organizations : "has"
+    issue_cases }o--|| issue_types : "has type"
+
+    issue_cases ||--|{ case_media : "has media"
+
+    issue_cases ||--|{ case_activity_logs : "has logs"
+
+    users }o--|{ case_activity_logs : "changed by"
+
+    issue_cases ||--o{ case_organizations : "assigned to"
+    organizations ||--o{ case_organizations : "responsible for"
 ```
 
 คำอธิบายตาราง (Entities)
