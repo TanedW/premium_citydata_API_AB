@@ -1,12 +1,15 @@
 // /api/cases.js
 
 // (!!! สำคัญ !!!)
-// ลบ 3 บรรทัดนี้ทิ้ง (หรือคอมเมนต์ออก)
-// export const config = {
-//   runtime: 'edge',
-// };
+// เราจะเก็บ 'edge' runtime ไว้
+export const config = {
+  runtime: 'edge',
+};
 
 import { neon } from '@neondatabase/serverless';
+// (!!! สำคัญ !!!)
+// เราต้องใช้ 'crypto' เพื่อสร้าง UUID ในฝั่ง JS
+import { crypto } from 'node:crypto';
 
 // Define CORS Headers
 const corsHeaders = {
@@ -103,89 +106,102 @@ export default async function handler(req) {
         validUserId = user_id;
       }
       
-      // 3.3. ตรรกะ "สุ่มแล้วเช็ก" (เราจะกลับไปใช้แบบ `while` loop ที่ดีกว่าได้)
-      let newCase = null;
-      let attempts = 0;
-      const MAX_ATTEMPTS = 5;
-
-      while (attempts < MAX_ATTEMPTS) {
-        const caseCode = generateCaseCode();
+      // 3.3. (!!! หัวใจสำคัญ !!!)
+      // สร้าง ID ทั้งหมดขึ้นมาก่อน
+      const newCaseId = crypto.randomUUID(); // <-- สร้าง UUID ใน JS
+      const caseCode = generateCaseCode();
         
-        try {
-          // 3.4. !!! เริ่ม Transaction !!!
-          // (โค้ดนี้จะทำงานได้ถูกต้อง 100% บน Node.js Runtime)
-          const result = await sql.transaction(async (tx) => {
-            
-            // Step 1: สร้างเคสหลัก
-            const insertedCase = await tx`
-              INSERT INTO issue_cases (
-                case_code, title, description, cover_image_url, 
-                issue_type_id, latitude, longitude, tags
-              ) VALUES (
-                ${caseCode}, ${title}, ${description}, ${cover_image_url}, 
-                ${issue_type_id}, ${latitude}, ${longitude}, ${tags}
-              )
-              RETURNING *;
-            `;
-            
-            const newCaseData = insertedCase[0];
-            const newCaseId = newCaseData.issue_cases_id;
+      // 3.4. สร้าง "Array" ของ Queries
+      // (นี่คือสิ่งที่ Vercel Edge ต้องการ)
+      const queries = [];
 
-            // Step 2: (ถ้ามี) บันทึกไฟล์มีเดีย
-            if (media_files && media_files.length > 0) {
-              for (const file of media_files) {
-                await tx`
-                  INSERT INTO case_media (case_id, media_type, url)
-                  VALUES (${newCaseId}, ${file.media_type}, ${file.url})
-                `;
-              }
-            }
+      // Step 1: Query สร้างเคสหลัก
+      // (เราจะส่ง `issue_cases_id` ที่เราสร้างเองเข้าไป)
+      queries.push(sql`
+        INSERT INTO issue_cases (
+          issue_cases_id, -- <-- ส่ง ID เข้าไป
+          case_code, 
+          title, 
+          description, 
+          cover_image_url, 
+          issue_type_id, 
+          latitude, 
+          longitude, 
+          tags
+        ) VALUES (
+          ${newCaseId}, -- <-- ส่ง ID เข้าไป
+          ${caseCode}, 
+          ${title}, 
+          ${description}, 
+          ${cover_image_url}, 
+          ${issue_type_id}, 
+          ${latitude}, 
+          ${longitude}, 
+          ${tags}
+        )
+        RETURNING *; -- เรายังคงต้องการผลลัพธ์กลับมา
+      `);
 
-            // Step 3: บันทึกประวัติการสร้าง
-            try {
-              await tx`
-                INSERT INTO case_status_logs 
-                  (case_id, old_status, new_status, comment, changed_by_user_id)
-                VALUES
-                  (${newCaseId}, NULL, ${newCaseData.status}, 'สร้างเคสใหม่', ${validUserId});
-              `;
-            } catch (logError) {
-              console.error("Failed to save case status log:", logError.message);
-              throw new Error(`Log saving failed: ${logError.message}`); 
-            }
-
-            // Step 4: ส่งข้อมูลเคสที่สร้างเสร็จ ออกจาก Transaction
-            return newCaseData;
-          });
-          
-          newCase = result;
-          break; // ถ้า Transaction สำเร็จ ให้ออกจาก Loop
-
-        } catch (err) {
-          // ตรวจสอบว่า Error เกิดจาก 'unique constraint' (รหัสซ้ำ) หรือไม่
-          if (err.message && err.message.includes('unique constraint') && err.message.includes('issue_cases_case_code_key')) {
-            attempts++;
-            console.warn(`Case code collision: ${caseCode}. Retrying...`);
-          } else {
-            // ถ้าเป็น Error อื่น (เช่น issue_type_id ผิด) ให้โยน Error ออกไปเลย
-            throw err;
-          }
+      // Step 2: (ถ้ามี) Query สร้างไฟล์มีเดีย
+      // (เราใช้ `newCaseId` ที่เราสร้างไว้ได้เลย)
+      if (media_files && media_files.length > 0) {
+        for (const file of media_files) {
+          queries.push(sql`
+            INSERT INTO case_media (case_id, media_type, url)
+            VALUES (${newCaseId}, ${file.media_type}, ${file.url})
+          `);
         }
-      } // จบ while loop
-
-      // 3.5. ตรวจสอบผลลัพธ์
-      if (newCase) {
-        return new Response(JSON.stringify(newCase), { 
-            status: 201, 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      } else {
-        throw new Error(`Failed to generate unique case code after ${MAX_ATTEMPTS} attempts.`);
       }
 
+      // Step 3: Query สร้างประวัติ
+      // (เราใช้ `newCaseId` ที่เราสร้างไว้ได้เลย)
+      queries.push(sql`
+        INSERT INTO case_status_logs 
+          (case_id, old_status, new_status, comment, changed_by_user_id)
+        VALUES
+          (${newCaseId}, NULL, 'รอรับเรื่อง', 'สร้างเคสใหม่', ${validUserId});
+      `);
+      
+      // 3.5. !!! รัน Transaction (แบบ Array) !!!
+      const results = await sql.transaction(queries);
+          
+      // 3.6. Transaction สำเร็จ
+      // `results` คือ Array ของผลลัพธ์
+      // ผลลัพธ์ของ Query แรก (RETURNING *) คือเคสที่เราสร้าง
+      const newCase = results[0]; 
+      
+      return new Response(JSON.stringify(newCase), { 
+          status: 201, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+
     } catch (error) {
-      // 3.6. จัดการ Error ทั้งหมด
+      // 3.7. จัดการ Error
       console.error("API Error (POST):", error);
+
+      // ถ้า Error เพราะรหัสเคสซ้ำ (โอกาส 1 ในล้าน)
+      if (error.message && error.message.includes('unique constraint') && error.message.includes('issue_cases_case_code_key')) {
+        return new Response(JSON.stringify({ 
+          message: 'Case code collision. Please try submitting again.',
+          error: error.message 
+        }), { 
+            status: 409, // 409 Conflict
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // ถ้า Error เพราะ Foreign Key (เช่น issue_type_id ผิด)
+      if (error.message && error.message.includes('violates foreign key constraint')) {
+         return new Response(JSON.stringify({ 
+          message: 'Invalid data. For example, issue_type_id or user_id does not exist.',
+          error: error.message 
+        }), { 
+            status: 400, // 400 Bad Request
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      
+      // Error อื่นๆ
       return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
           status: 500, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
