@@ -1,4 +1,4 @@
-// /api/cases.js
+// /api/issue_cases.js
 
 // (!!! สำคัญ !!!)
 // เราจะเก็บ 'edge' runtime ไว้
@@ -8,7 +8,7 @@ export const config = {
 
 import { neon } from '@neondatabase/serverless';
 // (!!! สำคัญ !!!)
-// เราได้ลบบรรทัด 'import { crypto } from 'node:crypto';' ทิ้งไปแล้ว
+// เรา "ไม่" import 'node:crypto'
 // เพราะ 'crypto' มีอยู่แล้วใน Vercel Edge Runtime
 
 // Define CORS Headers
@@ -111,8 +111,9 @@ export default async function handler(req) {
       // 'crypto' จะถูกดึงมาจาก Global Scope ของ Vercel Edge (ไม่ต้อง import)
       const newCaseId = crypto.randomUUID(); 
       const caseCode = generateCaseCode();
+      const defaultStatus = 'รอรับเรื่อง'; // สถานะเริ่มต้น
         
-      // 3.4. สร้าง "Array" ของ Queries
+      // 3.4. สร้าง "Array" ของ Queries (สำหรับ Vercel Edge)
       const queries = [];
 
       // Step 1: Query สร้างเคสหลัก
@@ -126,7 +127,8 @@ export default async function handler(req) {
           issue_type_id, 
           latitude, 
           longitude, 
-          tags
+          tags,
+          status
         ) VALUES (
           ${newCaseId}, 
           ${caseCode}, 
@@ -136,7 +138,8 @@ export default async function handler(req) {
           ${issue_type_id}, 
           ${latitude}, 
           ${longitude}, 
-          ${tags}
+          ${tags},
+          ${defaultStatus}
         )
         RETURNING *;
       `);
@@ -151,12 +154,12 @@ export default async function handler(req) {
         }
       }
 
-      // Step 3: Query สร้างประวัติ
+      // Step 3: (!!! แก้ไข !!!) Query สร้างประวัติ (ลงในตารางใหม่)
       queries.push(sql`
-        INSERT INTO case_status_logs 
-          (case_id, old_status, new_status, comment, changed_by_user_id)
+        INSERT INTO case_activity_logs 
+          (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
         VALUES
-          (${newCaseId}, NULL, 'รอรับเรื่อง', 'สร้างเคสใหม่', ${validUserId});
+          (${newCaseId}, ${validUserId}, 'CREATE', NULL, ${defaultStatus}, 'สร้างเคสใหม่');
       `);
       
       // 3.5. !!! รัน Transaction (แบบ Array) !!!
@@ -208,3 +211,4 @@ export default async function handler(req) {
       headers: corsHeaders 
   });
 }
+
