@@ -1,4 +1,4 @@
-// /api/issue_cases.js
+// /api/cases.js
 
 // (!!! สำคัญ !!!)
 // เราจะเก็บ 'edge' runtime ไว้
@@ -84,7 +84,8 @@ export default async function handler(req) {
         longitude,
         tags,
         media_files,
-        user_id // (Optional)
+        user_id, // (Optional)
+        organization_ids // (!!! ใหม่ !!!) Array ของ ID หน่วยงาน (integer)
       } = body;
       
       // 3.2. ตรวจสอบข้อมูลจำเป็น
@@ -108,7 +109,6 @@ export default async function handler(req) {
       
       // 3.3. (!!! หัวใจสำคัญ !!!)
       // สร้าง ID ทั้งหมดขึ้นมาก่อน
-      // 'crypto' จะถูกดึงมาจาก Global Scope ของ Vercel Edge (ไม่ต้อง import)
       const newCaseId = crypto.randomUUID(); 
       const caseCode = generateCaseCode();
       const defaultStatus = 'รอรับเรื่อง'; // สถานะเริ่มต้น
@@ -154,13 +154,29 @@ export default async function handler(req) {
         }
       }
 
-      // Step 3: (!!! แก้ไข !!!) Query สร้างประวัติ (ลงในตารางใหม่)
+      // Step 3: Query สร้างประวัติ
       queries.push(sql`
         INSERT INTO case_activity_logs 
           (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
         VALUES
           (${newCaseId}, ${validUserId}, 'CREATE', NULL, ${defaultStatus}, 'สร้างเคสใหม่');
       `);
+
+      // -----------------------------------------------------------
+      // (!!! นี่คือส่วนที่เพิ่มใหม่ !!!)
+      // Step 4: (ถ้ามี) Query จ่ายงานให้หน่วยงาน
+      if (organization_ids && organization_ids.length > 0) {
+        for (const orgId of organization_ids) {
+          // ตรวจสอบว่าเป็น Integer ที่ถูกต้อง
+          if (typeof orgId === 'number' && Number.isInteger(orgId)) {
+            queries.push(sql`
+              INSERT INTO case_organizations (case_id, organization_id, is_viewed)
+              VALUES (${newCaseId}, ${orgId}, false)
+            `);
+          }
+        }
+      }
+      // -----------------------------------------------------------
       
       // 3.5. !!! รัน Transaction (แบบ Array) !!!
       const results = await sql.transaction(queries);
@@ -177,7 +193,6 @@ export default async function handler(req) {
       // 3.7. จัดการ Error
       console.error("API Error (POST):", error);
 
-      // (เช็ก Error ที่พบบ่อย)
       if (error.message && error.message.includes('unique constraint') && error.message.includes('issue_cases_case_code_key')) {
         return new Response(JSON.stringify({ 
           message: 'Case code collision. Please try submitting again.',
@@ -189,7 +204,7 @@ export default async function handler(req) {
       }
       if (error.message && error.message.includes('violates foreign key constraint')) {
          return new Response(JSON.stringify({ 
-          message: 'Invalid data. For example, issue_type_id or user_id does not exist.',
+          message: 'Invalid data. For example, issue_type_id, user_id, or organization_id does not exist.',
           error: error.message 
         }), { 
             status: 400, // 400 Bad Request
