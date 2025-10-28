@@ -8,8 +8,8 @@ export const config = {
 
 import { neon } from '@neondatabase/serverless';
 // (!!! สำคัญ !!!)
-// เราต้องใช้ 'crypto' เพื่อสร้าง UUID ในฝั่ง JS
-import { crypto } from 'node:crypto';
+// เราได้ลบบรรทัด 'import { crypto } from 'node:crypto';' ทิ้งไปแล้ว
+// เพราะ 'crypto' มีอยู่แล้วใน Vercel Edge Runtime
 
 // Define CORS Headers
 const corsHeaders = {
@@ -108,18 +108,17 @@ export default async function handler(req) {
       
       // 3.3. (!!! หัวใจสำคัญ !!!)
       // สร้าง ID ทั้งหมดขึ้นมาก่อน
-      const newCaseId = crypto.randomUUID(); // <-- สร้าง UUID ใน JS
+      // 'crypto' จะถูกดึงมาจาก Global Scope ของ Vercel Edge (ไม่ต้อง import)
+      const newCaseId = crypto.randomUUID(); 
       const caseCode = generateCaseCode();
         
       // 3.4. สร้าง "Array" ของ Queries
-      // (นี่คือสิ่งที่ Vercel Edge ต้องการ)
       const queries = [];
 
       // Step 1: Query สร้างเคสหลัก
-      // (เราจะส่ง `issue_cases_id` ที่เราสร้างเองเข้าไป)
       queries.push(sql`
         INSERT INTO issue_cases (
-          issue_cases_id, -- <-- ส่ง ID เข้าไป
+          issue_cases_id, 
           case_code, 
           title, 
           description, 
@@ -129,7 +128,7 @@ export default async function handler(req) {
           longitude, 
           tags
         ) VALUES (
-          ${newCaseId}, -- <-- ส่ง ID เข้าไป
+          ${newCaseId}, 
           ${caseCode}, 
           ${title}, 
           ${description}, 
@@ -139,11 +138,10 @@ export default async function handler(req) {
           ${longitude}, 
           ${tags}
         )
-        RETURNING *; -- เรายังคงต้องการผลลัพธ์กลับมา
+        RETURNING *;
       `);
 
       // Step 2: (ถ้ามี) Query สร้างไฟล์มีเดีย
-      // (เราใช้ `newCaseId` ที่เราสร้างไว้ได้เลย)
       if (media_files && media_files.length > 0) {
         for (const file of media_files) {
           queries.push(sql`
@@ -154,7 +152,6 @@ export default async function handler(req) {
       }
 
       // Step 3: Query สร้างประวัติ
-      // (เราใช้ `newCaseId` ที่เราสร้างไว้ได้เลย)
       queries.push(sql`
         INSERT INTO case_status_logs 
           (case_id, old_status, new_status, comment, changed_by_user_id)
@@ -166,8 +163,6 @@ export default async function handler(req) {
       const results = await sql.transaction(queries);
           
       // 3.6. Transaction สำเร็จ
-      // `results` คือ Array ของผลลัพธ์
-      // ผลลัพธ์ของ Query แรก (RETURNING *) คือเคสที่เราสร้าง
       const newCase = results[0]; 
       
       return new Response(JSON.stringify(newCase), { 
@@ -179,7 +174,7 @@ export default async function handler(req) {
       // 3.7. จัดการ Error
       console.error("API Error (POST):", error);
 
-      // ถ้า Error เพราะรหัสเคสซ้ำ (โอกาส 1 ในล้าน)
+      // (เช็ก Error ที่พบบ่อย)
       if (error.message && error.message.includes('unique constraint') && error.message.includes('issue_cases_case_code_key')) {
         return new Response(JSON.stringify({ 
           message: 'Case code collision. Please try submitting again.',
@@ -189,8 +184,6 @@ export default async function handler(req) {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
-
-      // ถ้า Error เพราะ Foreign Key (เช่น issue_type_id ผิด)
       if (error.message && error.message.includes('violates foreign key constraint')) {
          return new Response(JSON.stringify({ 
           message: 'Invalid data. For example, issue_type_id or user_id does not exist.',
@@ -215,4 +208,3 @@ export default async function handler(req) {
       headers: corsHeaders 
   });
 }
-
