@@ -19,75 +19,88 @@ export default async function handler(req) {
     const sql = neon(process.env.DATABASE_URL);
 
     try {
-      // 1️⃣ ดึงค่า case_id จาก URL
+      // ✅ 1. ดึง case_id จาก URL
       const url = new URL(req.url, `http://${req.headers.get('host')}`);
       const case_id = url.pathname.split('/')[3];
 
-      // 2️⃣ ดึงข้อมูลจาก body
+      // ✅ 2. ดึงข้อมูลจาก body
       const body = await req.json();
       const { organization_id, user_id } = body;
 
+      // ตรวจสอบค่าที่จำเป็น
       if (!case_id || !organization_id || !user_id) {
         return new Response(
           JSON.stringify({
-            message: 'Missing required fields: case_id (from URL), organization_id, and user_id are required.',
+            message:
+              'Missing required fields: case_id (from URL), organization_id, and user_id are required.',
           }),
           { status: 400, headers: corsHeaders }
         );
       }
 
-      // 3️⃣ ดึงค่า old_status ก่อนอัปเดต
+      // ✅ 3. ดึงข้อมูล user
+      const [user] = await sql`
+        SELECT user_id, first_name
+        FROM users
+        WHERE user_id = ${user_id};
+      `;
+      const user_name = user?.first_name || 'ไม่ทราบชื่อ';
+
+      // ✅ 4. ดึงค่า old_status ของเคส
       const result = await sql`
         SELECT status 
         FROM issue_cases 
         WHERE issue_cases_id = ${case_id}
-        LIMIT 1
+        LIMIT 1;
       `;
       const oldStatus = result[0]?.status || null;
 
+      // ✅ 5. ตั้งค่าข้อมูลใหม่
       const newStatus = 'กำลังประสานงาน';
-      const comment = `เจ้าหน้าที่ (ID: ${user_id}) เข้าชมเคส โดยสถานะก่อนหน้า: ${oldStatus ?? 'ไม่ทราบ'}`;
+      const comment = `เจ้าหน้าที่ (ID: ${user_id} ชื่อ ${user_name}) เข้าชมเคส โดยสถานะก่อนหน้า: ${oldStatus ?? 'ไม่ทราบ'}`;
 
-      // 4️⃣ รวมทุกคำสั่งไว้ใน Transaction
+      // ✅ 6. เตรียม queries สำหรับ transaction
       const queries = [];
 
-      // อัปเดต is_viewed
+      // อัปเดตสถานะการเข้าชมของหน่วยงาน
       queries.push(sql`
         UPDATE case_organizations
         SET is_viewed = true
-        WHERE case_id = ${case_id} AND organization_id = ${organization_id}
+        WHERE case_id = ${case_id} AND organization_id = ${organization_id};
       `);
 
-      // อัปเดตสถานะ
+      // อัปเดตสถานะของเคส (เฉพาะที่ยังอยู่สถานะ 'รอรับเรื่อง')
       queries.push(sql`
         UPDATE issue_cases
         SET status = ${newStatus}, updated_at = now()
-        WHERE issue_cases_id = ${case_id} AND status = 'รอรับเรื่อง'
+        WHERE issue_cases_id = ${case_id} AND status = 'รอรับเรื่อง';
       `);
 
-      // บันทึก log พร้อม old/new value
+      // บันทึก Log
       queries.push(sql`
         INSERT INTO case_activity_logs 
           (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
         VALUES 
-          (${case_id}, ${user_id}, 'STATUS_CHANGE', ${oldStatus}, ${newStatus}, ${comment})
+          (${case_id}, ${user_id}, 'STATUS_CHANGE', ${oldStatus}, ${newStatus}, ${comment});
       `);
 
-      // 5️⃣ รันทั้งหมดใน Transaction เดียว
+      // ✅ 7. รันทั้งหมดใน transaction เดียว
       await sql.transaction(queries);
 
-      // 6️⃣ ตอบกลับ
+      // ✅ 8. ตอบกลับสำเร็จ
       return new Response(
         JSON.stringify({
           message: 'Case viewed and status updated successfully.',
           old_status: oldStatus,
           new_status: newStatus,
+          user_name,
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
 
     } catch (error) {
-      console.error('API Error:', error);
+      console.error('API Error (PATCH /view - Edge):', error);
+
       return new Response(
         JSON.stringify({ message: 'An error occurred', error: error.message }),
         { status: 500, headers: corsHeaders }
@@ -95,6 +108,7 @@ export default async function handler(req) {
     }
   }
 
+  // ❌ Method not allowed
   return new Response(
     JSON.stringify({ message: `Method ${req.method} Not Allowed` }),
     { status: 405, headers: corsHeaders }
