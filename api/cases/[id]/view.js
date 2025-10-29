@@ -1,244 +1,109 @@
-// // /api/cases/[id]/view.js
-// // (!!! สำคัญ !!!)
-// // รันบน Node.js Runtime (ไม่มี config)
-
-// import { neon } from '@neondatabase/serverless';
-
-// const corsHeaders = {
-//   'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app',
-//   'Access-Control-Allow-Methods': 'PATCH, OPTIONS',
-//   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-// };
-
-
-// export default async function handler(req) {
-//   if (req.method === 'OPTIONS') {
-//     return new Response(null, { status: 204, headers: corsHeaders });
-//   }
-
-//   if (req.method === 'PATCH') {
-//     const sql = neon(process.env.DATABASE_URL);
-//     let body;
-
-//     try {
-//       const { id: case_id } = req.query; 
-
-//       // -----------------------------------------------------------
-//       // (!!! นี่คือจุดที่แก้ไข !!!)
-//       // เปลี่ยนจาก 'await req.json()' เป็น 'req.body'
-//       body = req.body;
-//       // -----------------------------------------------------------
-
-//       const { organization_id, user_id } = body;
-
-//       if (!case_id || !organization_id || !user_id) {
-//         return new Response(JSON.stringify({ message: 'Missing required fields: case_id (from URL), organization_id (from body), and user_id (from body) are required.' }), {
-//           status: 400,
-//           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-//         });
-//       }
-      
-//       if (typeof organization_id !== 'number' || !Number.isInteger(organization_id) ||
-//           typeof user_id !== 'number' || !Number.isInteger(user_id)) {
-//          return new Response(JSON.stringify({ message: 'Invalid format: organization_id and user_id must be integers.' }), {
-//           status: 400,
-//           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-//         });
-//       }
-      
-//       const newStatus = 'กำลังประสานงาน'; 
-
-//       const transactionResult = await sql.transaction(async (tx) => {
-        
-//         const [oldCase, officer] = await Promise.all([
-//           tx`SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id}`,
-//           tx`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}` 
-//         ]);
-
-//         if (oldCase.length === 0) throw new Error('Case not found');
-//         if (officer.length === 0) throw new Error('User (officer) not found');
-        
-//         const oldStatus = oldCase[0].status;
-//         const officerName = `${officer[0].first_name || ''} ${officer[0].last_name || ''}`.trim();
-//         const comment = `เจ้าหน้าที่เข้าชมเคส โดย ${user_id} ${officerName}`; 
-
-//         const updatedOrg = await tx`
-//           UPDATE case_organizations
-//           SET is_viewed = true
-//           WHERE case_id = ${case_id} AND organization_id = ${organization_id}
-//           RETURNING *; 
-//         `;
-
-//         if (updatedOrg.length === 0) {
-//           throw new Error('This case is not assigned to this organization.');
-//         }
-
-//         await tx`
-//           UPDATE issue_cases
-//           SET status = ${newStatus}, updated_at = now()
-//           WHERE issue_cases_id = ${case_id}
-//         `;
-        
-//         await tx`
-//           INSERT INTO case_activity_logs 
-//             (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
-//           VALUES 
-//             (${case_id}, ${user_id}, 'STATUS_CHANGE', ${oldStatus}, ${newStatus}, ${comment})
-//         `;
-        
-//         return updatedOrg[0]; 
-//       });
-      
-//       return new Response(JSON.stringify(transactionResult), { 
-//           status: 200, 
-//           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-//       });
-
-//     } catch (error) {
-//       console.error("API Error (PATCH /view):", error);
-      
-//       let status = 500;
-//       if (error.message.includes('not found')) status = 404;
-//       if (error.message.includes('not assigned')) status = 404;
-
-//       return new Response(JSON.stringify({ message: error.message }), { 
-//           status: status, 
-//           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-//       });
-//     }
-//   }
-
-//   return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
-//       status: 405, 
-//       headers: corsHeaders 
-//   });
-// }
-
-
 // /api/cases/[id]/view.js
-// (!!! Runtime: 'Node.js' !!!)
-// (นี่คือ API ที่ "ฉลาด" สำหรับชมเคส และบันทึก Log ที่สมบูรณ์)
-// (!!! ไม่มี 'export const config' !!!)
+// API นี้มีหน้าที่เดียว: "ปั๊มตราว่าอ่านแล้ว" (is_viewed = true)
 
-// /api/cases/[id]/view.js
-// (!!! Runtime: 'Node.js' !!!)
-// (แก้ไขปัญหา Timeout โดยการลบ Promise.all)
+// (!!! สำคัญ !!!)
+// เราจะเก็บ 'edge' runtime ไว้
+export const config = {
+  runtime: 'edge',
+};
 
 import { neon } from '@neondatabase/serverless';
 
 // Define CORS Headers
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app',
-  'Access-Control-Allow-Methods': 'PATCH, OPTIONS',
+  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // URL ของ React App
+  'Access-Control-Allow-Methods': 'PATCH, OPTIONS', // อนุญาต PATCH (สำหรับอัปเดต)
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 
+// The main API handler function
 export default async function handler(req) {
+  // --- 1. Respond to OPTIONS (Preflight) request ---
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
+  // --- 2. Main logic for HTTP PATCH (อัปเดต 'is_viewed') ---
   if (req.method === 'PATCH') {
     const sql = neon(process.env.DATABASE_URL);
     let body;
 
     try {
       // 2.1. ดึง ID ของเคส (UUID) จาก URL
-      const { id: case_id } = req.query; 
+      const url = new URL(req.url, `http://${req.headers.get('host')}`);
+      const case_id = url.pathname.split('/')[3]; // เอา UUID ของเคสออกมา
 
-      // 2.2. ดึง ID ของหน่วยงาน (Integer) และ ID ของเจ้าหน้าที่ (Integer)
-      body = req.body;
-      const { organization_id, user_id } = body;
+      // 2.2. ดึง ID ของหน่วยงาน (Integer) จาก JSON Body
+      body = await req.json();
+      const { organization_id } = body;
 
       // 2.3. ตรวจสอบข้อมูล
-      if (!case_id || !organization_id || !user_id) {
-        return new Response(JSON.stringify({ message: 'Missing required fields: case_id (from URL), organization_id (from body), and user_id (from body) are required.' }), {
+      if (!case_id || !organization_id) {
+        return new Response(JSON.stringify({ message: 'Missing required fields: case_id (from URL) and organization_id (from body) are required.' }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
       
-      if (typeof organization_id !== 'number' || !Number.isInteger(organization_id) ||
-          typeof user_id !== 'number' || !Number.isInteger(user_id)) {
-         return new Response(JSON.stringify({ message: 'Invalid format: organization_id and user_id must be integers.' }), {
+      if (typeof organization_id !== 'number' || !Number.isInteger(organization_id)) {
+         return new Response(JSON.stringify({ message: 'Invalid organization_id: Must be an integer.' }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
+
+      // 2.4. !!! คำสั่ง SQL (หัวใจสำคัญ) !!!
+      // อัปเดตตาราง 'case_organizations'
+      // โดยค้นหา "แถว" ที่ตรงกับเคสนี้ และ หน่วยงานนี้
+      const results = await sql`
+        UPDATE case_organizations
+        SET 
+          is_viewed = true
+        WHERE 
+          case_id = ${case_id} AND organization_id = ${organization_id}
+        RETURNING *; 
+      `;
       
-      const newStatus = 'กำลังประสานงาน'; 
-
-      // 2.4. !!! เริ่ม Transaction (แบบ 'Node.js' ที่ซับซ้อนได้) !!!
-      const transactionResult = await sql.transaction(async (tx) => {
-        
-        // -----------------------------------------------------------
-        // (!!! นี่คือจุดที่แก้ไข !!!)
-        // Step 1: ดึงข้อมูลเก่า (ทีละขั้น)
-        const oldCase = await tx`SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id}`;
-        if (oldCase.length === 0) throw new Error('Case not found');
-        
-        // Step 2: ดึงชื่อเจ้าหน้าที่ (ทีละขั้น)
-        const officer = await tx`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
-        if (officer.length === 0) throw new Error('User (officer) not found');
-        // -----------------------------------------------------------
-        
-        const oldStatus = oldCase[0].status;
-        const officerName = `${officer[0].first_name || ''} ${officer[0].last_name || ''}`.trim();
-        const comment = `เจ้าหน้าที่เข้าชมเคส โดย ${user_id} ${officerName}`; 
-
-        // Step 3: อัปเดตตาราง 'case_organizations' (ตั้งค่า is_viewed = true)
-        const updatedOrg = await tx`
-          UPDATE case_organizations
-          SET is_viewed = true
-          WHERE case_id = ${case_id} AND organization_id = ${organization_id}
-          RETURNING *; 
-        `;
-
-        if (updatedOrg.length === 0) {
-          throw new Error('This case is not assigned to this organization.');
-        }
-
-        // Step 4: อัปเดตตาราง 'issue_cases' (ตั้งค่า status = 'กำลังประสานงาน')
-        if (oldStatus === 'รอรับเรื่อง') {
-          await tx`
-            UPDATE issue_cases
-            SET status = ${newStatus}, updated_at = now()
-            WHERE issue_cases_id = ${case_id}
-          `;
-        }
-        
-        // Step 5: บันทึกประวัติลง 'case_activity_logs' (ด้วย Log ที่สมบูรณ์)
-        await tx`
-          INSERT INTO case_activity_logs 
-            (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
-          VALUES 
-            (${case_id}, ${user_id}, 'STATUS_CHANGE', ${oldStatus}, ${newStatus}, ${comment})
-        `;
-        
-        return updatedOrg[0]; // ส่งผลลัพธ์จาก Step 3 กลับไป
-      });
+      // 2.5. ตรวจสอบว่าอัปเดตสำเร็จหรือไม่
+      if (results.length === 0) {
+        // ถ้าไม่เจอแถวที่ตรงกัน (เช่น จ่ายงานผิดคน หรือเคสไม่มีอยู่จริง)
+        return new Response(JSON.stringify({ message: 'Record not found. This case may not be assigned to this organization.' }), {
+          status: 404, // 404 Not Found
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
       
-      return new Response(JSON.stringify(transactionResult), { 
-          status: 200, 
+      // 2.6. Transaction สำเร็จ
+      return new Response(JSON.stringify(results[0]), { 
+          status: 200, // 200 OK
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
 
     } catch (error) {
-      console.error("API Error (PATCH /view, Node.js):", error);
-      let status = 500;
-      if (error.message.includes('not found')) status = 404;
-      if (error.message.includes('not assigned')) status = 404;
-
-      return new Response(JSON.stringify({ message: error.message }), { 
-          status: status, 
+      // 2.7. จัดการ Error
+      console.error("API Error (PATCH /view):", error);
+      
+      if (error.message && error.message.includes('violates foreign key constraint')) {
+         return new Response(JSON.stringify({ 
+          message: 'Invalid data. For example, case_id or organization_id does not exist.',
+          error: error.message 
+        }), { 
+            status: 400, // 400 Bad Request
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      
+      return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
+          status: 500, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
   }
 
+  // --- 3. Handle any other HTTP methods ---
   return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
       status: 405, 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      headers: corsHeaders 
   });
 }
