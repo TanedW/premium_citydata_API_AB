@@ -41,6 +41,7 @@ export default async function handler(req) {
         SET is_viewed = true
         WHERE case_id = ${case_id} AND organization_id = ${organization_id}
         RETURNING *;
+        
       `;
 
       if (results.length === 0) {
@@ -75,7 +76,7 @@ export default async function handler(req) {
           ${user_id},
           'COMMENT',
           'กำลังประสานงาน',
-          ${'เจ้าหน้าที่เข้าชมเคส โดย ' + user_uid + ' ' + user_name},
+          ${'เจ้าหน้าที่เข้าชมเคส โดย ' + user_id + ' ' + user_name},
           NOW()
         );
       `;
