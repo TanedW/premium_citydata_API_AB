@@ -120,6 +120,10 @@
 // (นี่คือ API ที่ "ฉลาด" สำหรับชมเคส และบันทึก Log ที่สมบูรณ์)
 // (!!! ไม่มี 'export const config' !!!)
 
+// /api/cases/[id]/view.js
+// (!!! Runtime: 'Node.js' !!!)
+// (แก้ไขปัญหา Timeout โดยการลบ Promise.all)
+
 import { neon } from '@neondatabase/serverless';
 
 // Define CORS Headers
@@ -141,13 +145,10 @@ export default async function handler(req) {
 
     try {
       // 2.1. ดึง ID ของเคส (UUID) จาก URL
-      // (Node.js Runtime อ่านจาก 'req.query')
       const { id: case_id } = req.query; 
 
       // 2.2. ดึง ID ของหน่วยงาน (Integer) และ ID ของเจ้าหน้าที่ (Integer)
-      // (Node.js Runtime อ่านจาก 'req.body')
       body = req.body;
-
       const { organization_id, user_id } = body;
 
       // 2.3. ตรวจสอบข้อมูล
@@ -171,21 +172,22 @@ export default async function handler(req) {
       // 2.4. !!! เริ่ม Transaction (แบบ 'Node.js' ที่ซับซ้อนได้) !!!
       const transactionResult = await sql.transaction(async (tx) => {
         
-        // Step 1: ดึงข้อมูลเก่า (สถานะเก่า และ ชื่อเจ้าหน้าที่)
-        const [oldCase, officer] = await Promise.all([
-          tx`SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id}`,
-          tx`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}` 
-          // (!!!) แก้ 'first_name', 'last_name' ถ้าตาราง users ของคุณใช้ชื่ออื่น
-        ]);
-
+        // -----------------------------------------------------------
+        // (!!! นี่คือจุดที่แก้ไข !!!)
+        // Step 1: ดึงข้อมูลเก่า (ทีละขั้น)
+        const oldCase = await tx`SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id}`;
         if (oldCase.length === 0) throw new Error('Case not found');
+        
+        // Step 2: ดึงชื่อเจ้าหน้าที่ (ทีละขั้น)
+        const officer = await tx`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
         if (officer.length === 0) throw new Error('User (officer) not found');
+        // -----------------------------------------------------------
         
         const oldStatus = oldCase[0].status;
         const officerName = `${officer[0].first_name || ''} ${officer[0].last_name || ''}`.trim();
         const comment = `เจ้าหน้าที่เข้าชมเคส โดย ${user_id} ${officerName}`; 
 
-        // Step 2: อัปเดตตาราง 'case_organizations' (ตั้งค่า is_viewed = true)
+        // Step 3: อัปเดตตาราง 'case_organizations' (ตั้งค่า is_viewed = true)
         const updatedOrg = await tx`
           UPDATE case_organizations
           SET is_viewed = true
@@ -197,8 +199,7 @@ export default async function handler(req) {
           throw new Error('This case is not assigned to this organization.');
         }
 
-        // Step 3: อัปเดตตาราง 'issue_cases' (ตั้งค่า status = 'กำลังประสานงาน')
-        // (เราจะเช็กก่อนว่าสถานะเป็น 'รอรับเรื่อง' หรือไม่)
+        // Step 4: อัปเดตตาราง 'issue_cases' (ตั้งค่า status = 'กำลังประสานงาน')
         if (oldStatus === 'รอรับเรื่อง') {
           await tx`
             UPDATE issue_cases
@@ -207,7 +208,7 @@ export default async function handler(req) {
           `;
         }
         
-        // Step 4: บันทึกประวัติลง 'case_activity_logs' (ด้วย Log ที่สมบูรณ์)
+        // Step 5: บันทึกประวัติลง 'case_activity_logs' (ด้วย Log ที่สมบูรณ์)
         await tx`
           INSERT INTO case_activity_logs 
             (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
@@ -215,7 +216,7 @@ export default async function handler(req) {
             (${case_id}, ${user_id}, 'STATUS_CHANGE', ${oldStatus}, ${newStatus}, ${comment})
         `;
         
-        return updatedOrg[0]; // ส่งผลลัพธ์จาก Step 2 กลับไป
+        return updatedOrg[0]; // ส่งผลลัพธ์จาก Step 3 กลับไป
       });
       
       return new Response(JSON.stringify(transactionResult), { 
