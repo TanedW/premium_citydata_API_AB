@@ -1,3 +1,6 @@
+export const config = {
+  runtime: 'nodejs', // <--- ระบุ 'nodejs' โดยตรง
+};
 import { neon } from '@neondatabase/serverless';
 
 // Define CORS Headers
