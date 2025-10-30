@@ -14,9 +14,6 @@ const corsHeaders = {
 export default async function handler(req) {
   // --- 1. Respond to OPTIONS (Preflight) request ---
   if (req.method === 'OPTIONS') {
-    // Node.js runtime handles OPTIONS differently, often automatically.
-    // However, explicitly handling it ensures CORS headers are set correctly.
-    // Sending back the allowed methods and headers.
     const headers = {
         ...corsHeaders,
         'Access-Control-Allow-Methods': 'PATCH, OPTIONS',
@@ -32,15 +29,10 @@ export default async function handler(req) {
 
     try {
       // 2.1. ดึง ID ของเคส (UUID) จาก URL
-      // (Node.js Runtime อ่านจาก 'req.query')
-      // Vercel populates req.query based on the file path [id].js -> req.query.id
       const { id: case_id } = req.query; 
 
       // 2.2. ดึง ID ของหน่วยงาน (Integer) และ ID ของเจ้าหน้าที่ (Integer)
-      // (Node.js Runtime อ่าน JSON body จาก 'req.body')
-      // Vercel parses the JSON body automatically for Node.js functions
       body = req.body;
-
       const { organization_id, user_id } = body;
 
       // 2.3. ตรวจสอบข้อมูล
@@ -61,41 +53,51 @@ export default async function handler(req) {
       
       const newStatus = 'กำลังประสานงาน'; // สถานะใหม่
 
-      console.log('Starting transaction...'); // <-- LOG 1
+      console.log('Starting manual transaction...'); // <-- LOG 1
 
-      // 2.4. !!! เริ่ม Transaction (แบบ 'Node.js' ที่ซับซ้อนได้) !!!
-      const transactionResult = await sql.transaction(async (tx) => {
+      // 2.4. !!! เริ่ม Transaction (แบบ Manual) !!!
+      
+      let transactionResult; // ประกาศตัวแปรสำหรับผลลัพธ์นอก try...catch
+
+      // ใช้ try...catch ซ้อนกันเพื่อจัดการ Rollback
+      try {
         
+        // 1. เริ่ม Transaction
+        await sql`BEGIN`;
+
         // Step 1: ดึงข้อมูลเก่า (สถานะเก่า)
-        const oldCase = await tx`SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id}`;
+        // (สำคัญ: เปลี่ยน 'tx' ทั้งหมดเป็น 'sql' เพราะเราใช้ connection หลัก)
+        const oldCase = await sql`SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id}`;
         if (oldCase.length === 0) throw new Error('Case not found');
         const oldStatus = oldCase[0].status;
         
         // Step 2: ดึงชื่อเจ้าหน้าที่
-        const officer = await tx`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
+        const officer = await sql`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
         if (officer.length === 0) throw new Error('User (officer) not found');
         
         const officerName = `${officer[0].first_name || ''} ${officer[0].last_name || ''}`.trim();
         const comment = `เจ้าหน้าที่เข้าชมเคส โดย ${user_id} ${officerName}`; // คอมเมนต์ Log
 
         // Step 3: อัปเดตตาราง 'case_organizations' (ตั้งค่า is_viewed = true)
-        const updatedOrg = await tx`
+        const updatedOrg = await sql`
           UPDATE case_organizations
           SET is_viewed = true
           WHERE case_id = ${case_id} AND organization_id = ${organization_id}
           RETURNING *; 
         `;
 
-        // ตรวจสอบว่ามีแถวถูกอัปเดตหรือไม่ (ป้องกันการยิงใส่เคสที่ไม่ได้รับมอบหมาย)
+        // ตรวจสอบว่ามีแถวถูกอัปเดตหรือไม่
         if (updatedOrg.length === 0) {
           throw new Error('This case might not be assigned to this organization, or the record does not exist.');
         }
+        
+        // เก็บผลลัพธ์ไว้ส่งกลับ
+        transactionResult = updatedOrg[0];
 
         // Step 4: อัปเดตตาราง 'issue_cases' (เปลี่ยน status)
-        // (เช็กก่อนว่าสถานะปัจจุบันคือ 'รอรับเรื่อง' หรือไม่ เพื่อป้องกันการเขียนทับ)
         let statusUpdated = false;
         if (oldStatus === 'รอรับเรื่อง') {
-          await tx`
+          await sql`
             UPDATE issue_cases
             SET status = ${newStatus}, updated_at = now()
             WHERE issue_cases_id = ${case_id}
@@ -103,20 +105,18 @@ export default async function handler(req) {
           statusUpdated = true;
         }
         
-        // Step 5: บันทึกประวัติลง 'case_activity_logs' (ด้วย Log ที่สมบูรณ์)
-        // บันทึกเฉพาะเมื่อมีการเปลี่ยนสถานะจริงๆ
+        // Step 5: บันทึกประวัติลง 'case_activity_logs'
         if (statusUpdated) {
-          await tx`
+          // บันทึก Log การเปลี่ยนสถานะ
+          await sql`
             INSERT INTO case_activity_logs 
               (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
             VALUES 
               (${case_id}, ${user_id}, 'STATUS_CHANGE', ${oldStatus}, ${newStatus}, ${comment})
           `;
         } else {
-            // ถ้าสถานะไม่ได้เปลี่ยน (เช่น เคสถูกเปิดอ่านซ้ำ) เราอาจจะบันทึก Log แบบอื่น
-            // หรือ ไม่บันทึกเลยก็ได้ ขึ้นอยู่กับความต้องการ
-            // ตัวอย่าง: บันทึกแค่การเข้าชมซ้ำ (ถ้าต้องการ)
-             await tx`
+            // บันทึก Log การเข้าชมซ้ำ (กรณีสถานะไม่เปลี่ยน)
+             await sql`
                INSERT INTO case_activity_logs
                  (case_id, changed_by_user_id, activity_type, comment)
                VALUES
@@ -124,11 +124,20 @@ export default async function handler(req) {
              `;
         }
         
-        // ส่งผลลัพธ์จาก Step 3 (ข้อมูล is_viewed ที่อัปเดตแล้ว) กลับไป
-        return updatedOrg[0]; 
-      });
+        // 2. ถ้าทุกอย่างสำเร็จ ให้ COMMIT
+        await sql`COMMIT`;
+        
+        console.log('Transaction committed successfully.'); // <-- LOG 2
+
+      } catch (innerError) {
+        // 3. ถ้ามี Error (ใน try ด้านบน) ให้ ROLLBACK
+        console.error("Transaction Error, Rolling back:", innerError.message);
+        await sql`ROLLBACK`;
+        
+        // ส่ง Error ที่เกิดขึ้นภายใน Transaction ออกไปให้ catch ด้านนอกจัดการ
+        throw innerError; 
+      }
       
-      console.log('Transaction successful, preparing response:', transactionResult); // <-- LOG 2
       // 2.5. Transaction สำเร็จ
       return new Response(JSON.stringify(transactionResult), { 
           status: 200, // 200 OK
@@ -136,7 +145,7 @@ export default async function handler(req) {
       });
 
     } catch (error) {
-      // 2.6. จัดการ Error
+      // 2.6. จัดการ Error (ทั้ง Error การเชื่อมต่อ หรือ Error จาก Transaction)
       console.error("API Error (PATCH /view, Node.js):", error);
       let status = 500;
       let message = 'An error occurred processing your request.';
