@@ -186,6 +186,8 @@ export default async function handler(req) {
       
       const newStatus = 'กำลังประสานงาน'; // สถานะใหม่
 
+      console.log('Starting transaction...'); // <-- LOG 1
+
       // 2.4. !!! เริ่ม Transaction (แบบ 'Node.js' ที่ซับซ้อนได้) !!!
       const transactionResult = await sql.transaction(async (tx) => {
         
@@ -250,7 +252,9 @@ export default async function handler(req) {
         // ส่งผลลัพธ์จาก Step 3 (ข้อมูล is_viewed ที่อัปเดตแล้ว) กลับไป
         return updatedOrg[0]; 
       });
+
       
+      console.log('Transaction successful, preparing response:', transactionResult); // <-- LOG 2
       // 2.5. Transaction สำเร็จ
       return new Response(JSON.stringify(transactionResult), { 
           status: 200, // 200 OK
