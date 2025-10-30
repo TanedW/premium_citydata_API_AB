@@ -1,43 +1,167 @@
-// /api/cases/[id]/view.js
-// (!!! นี่คือไฟล์ทดสอบชั่วคราว !!!)
-// (!!! ไม่มี 'export const config' !!!)
+import { neon } from '@neondatabase/serverless';
 
 // Define CORS Headers
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', 
+  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // <-- ตรวจสอบ URL ของ React App
   'Access-Control-Allow-Methods': 'PATCH, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+
 export default async function handler(req) {
+  // --- 1. Respond to OPTIONS (Preflight) request ---
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders });
+    // Node.js runtime handles OPTIONS differently, often automatically.
+    // However, explicitly handling it ensures CORS headers are set correctly.
+    // Sending back the allowed methods and headers.
+    const headers = {
+        ...corsHeaders,
+        'Access-Control-Allow-Methods': 'PATCH, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    };
+    return new Response(null, { status: 204, headers: headers });
   }
 
-  // --- ส่วนทดสอบ ---
+  // --- 2. Main logic for HTTP PATCH (อัปเดต 'is_viewed' และ 'status') ---
   if (req.method === 'PATCH') {
-    // พยายามเข้าถึงตัวแปรที่มีเฉพาะใน Node.js
-    const isNode = typeof process !== 'undefined' && process.versions && process.versions.node;
-    const runtimeInfo = isNode ? `Node.js version: ${process.versions.node}` : 'Edge Runtime (or unknown)';
+    const sql = neon(process.env.DATABASE_URL);
+    let body;
 
-    console.log(`RUNTIME CHECK: ${runtimeInfo}`); // <-- Log นี้สำคัญมาก
+    try {
+      // 2.1. ดึง ID ของเคส (UUID) จาก URL
+      // (Node.js Runtime อ่านจาก 'req.query')
+      // Vercel populates req.query based on the file path [id].js -> req.query.id
+      const { id: case_id } = req.query; 
 
-    // ดึง ID เพื่อให้รู้ว่า Request ถูกต้อง
-    const case_id = req.query ? req.query.id : 'ID not available in query (Likely Edge)'; 
+      // 2.2. ดึง ID ของหน่วยงาน (Integer) และ ID ของเจ้าหน้าที่ (Integer)
+      // (Node.js Runtime อ่าน JSON body จาก 'req.body')
+      // Vercel parses the JSON body automatically for Node.js functions
+      body = req.body;
 
-    return new Response(JSON.stringify({ 
-      message: 'Runtime Check Complete', 
-      detectedRuntime: runtimeInfo,
-      caseIdReceived: case_id 
-    }), { 
-      status: 200, 
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+      const { organization_id, user_id } = body;
+
+      // 2.3. ตรวจสอบข้อมูล
+      if (!case_id || !organization_id || !user_id) {
+        return new Response(JSON.stringify({ message: 'Missing required fields: case_id (from URL), organization_id (from body), and user_id (from body) are required.' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      
+      if (typeof organization_id !== 'number' || !Number.isInteger(organization_id) ||
+          typeof user_id !== 'number' || !Number.isInteger(user_id)) {
+         return new Response(JSON.stringify({ message: 'Invalid format: organization_id and user_id must be integers.' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      
+      const newStatus = 'กำลังประสานงาน'; // สถานะใหม่
+
+      console.log('Starting transaction...'); // <-- LOG 1
+
+      // 2.4. !!! เริ่ม Transaction (แบบ 'Node.js' ที่ซับซ้อนได้) !!!
+      const transactionResult = await sql.transaction(async (tx) => {
+        
+        // Step 1: ดึงข้อมูลเก่า (สถานะเก่า)
+        const oldCase = await tx`SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id}`;
+        if (oldCase.length === 0) throw new Error('Case not found');
+        const oldStatus = oldCase[0].status;
+        
+        // Step 2: ดึงชื่อเจ้าหน้าที่
+        const officer = await tx`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
+        if (officer.length === 0) throw new Error('User (officer) not found');
+        
+        const officerName = `${officer[0].first_name || ''} ${officer[0].last_name || ''}`.trim();
+        const comment = `เจ้าหน้าที่เข้าชมเคส โดย ${user_id} ${officerName}`; // คอมเมนต์ Log
+
+        // Step 3: อัปเดตตาราง 'case_organizations' (ตั้งค่า is_viewed = true)
+        const updatedOrg = await tx`
+          UPDATE case_organizations
+          SET is_viewed = true
+          WHERE case_id = ${case_id} AND organization_id = ${organization_id}
+          RETURNING *; 
+        `;
+
+        // ตรวจสอบว่ามีแถวถูกอัปเดตหรือไม่ (ป้องกันการยิงใส่เคสที่ไม่ได้รับมอบหมาย)
+        if (updatedOrg.length === 0) {
+          throw new Error('This case might not be assigned to this organization, or the record does not exist.');
+        }
+
+        // Step 4: อัปเดตตาราง 'issue_cases' (เปลี่ยน status)
+        // (เช็กก่อนว่าสถานะปัจจุบันคือ 'รอรับเรื่อง' หรือไม่ เพื่อป้องกันการเขียนทับ)
+        let statusUpdated = false;
+        if (oldStatus === 'รอรับเรื่อง') {
+          await tx`
+            UPDATE issue_cases
+            SET status = ${newStatus}, updated_at = now()
+            WHERE issue_cases_id = ${case_id}
+          `;
+          statusUpdated = true;
+        }
+        
+        // Step 5: บันทึกประวัติลง 'case_activity_logs' (ด้วย Log ที่สมบูรณ์)
+        // บันทึกเฉพาะเมื่อมีการเปลี่ยนสถานะจริงๆ
+        if (statusUpdated) {
+          await tx`
+            INSERT INTO case_activity_logs 
+              (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
+            VALUES 
+              (${case_id}, ${user_id}, 'STATUS_CHANGE', ${oldStatus}, ${newStatus}, ${comment})
+          `;
+        } else {
+            // ถ้าสถานะไม่ได้เปลี่ยน (เช่น เคสถูกเปิดอ่านซ้ำ) เราอาจจะบันทึก Log แบบอื่น
+            // หรือ ไม่บันทึกเลยก็ได้ ขึ้นอยู่กับความต้องการ
+            // ตัวอย่าง: บันทึกแค่การเข้าชมซ้ำ (ถ้าต้องการ)
+             await tx`
+               INSERT INTO case_activity_logs
+                 (case_id, changed_by_user_id, activity_type, comment)
+               VALUES
+                 (${case_id}, ${user_id}, 'COMMENT', ${`เจ้าหน้าที่ ${user_id} ${officerName} เข้าชมเคสซ้ำ (สถานะปัจจุบัน: ${oldStatus})`})
+             `;
+        }
+        
+        // ส่งผลลัพธ์จาก Step 3 (ข้อมูล is_viewed ที่อัปเดตแล้ว) กลับไป
+        return updatedOrg[0]; 
+      });
+      
+      console.log('Transaction successful, preparing response:', transactionResult); // <-- LOG 2
+      // 2.5. Transaction สำเร็จ
+      return new Response(JSON.stringify(transactionResult), { 
+          status: 200, // 200 OK
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+
+    } catch (error) {
+      // 2.6. จัดการ Error
+      console.error("API Error (PATCH /view, Node.js):", error);
+      let status = 500;
+      let message = 'An error occurred processing your request.';
+
+      if (error.message === 'Case not found') {
+        status = 404;
+        message = error.message;
+      } else if (error.message === 'User (officer) not found') {
+        status = 400; // Bad Request เพราะ user_id ที่ส่งมาไม่มีอยู่จริง
+        message = error.message;
+      } else if (error.message.includes('not assigned')) {
+          status = 404; // Not Found เพราะเคสนี้ไม่ได้มอบหมายให้ org นี้
+          message = error.message;
+      } else if (error.message.includes('violates foreign key constraint')) {
+          status = 400; // Bad Request เพราะข้อมูลอ้างอิงผิดพลาด
+          message = 'Invalid data provided. Ensure case_id, organization_id, and user_id exist and are valid.';
+      }
+
+      return new Response(JSON.stringify({ message: message, error: error.message }), { 
+          status: status, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
   }
-  // --- จบส่วนทดสอบ ---
 
+  // --- 3. Handle any other HTTP methods ---
   return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
-    status: 405, headers: corsHeaders 
+      status: 405, // 405 Method Not Allowed
+      headers: corsHeaders 
   });
 }
-
