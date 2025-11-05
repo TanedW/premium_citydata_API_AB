@@ -1,23 +1,43 @@
 // ไฟล์: /api/usage-types.js
 
-import { Pool } from 'pg';
+import { neon } from '@neondatabase/serverless';
 
-const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
-});
+// 1. กำหนดให้ API นี้ทำงานบน Edge Runtime
+export const config = {
+  runtime: 'edge',
+};
 
-export default async function handler(req, res) {
+// 2. (Optional) กำหนด CORS Headers
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*', // หรือ 'https://your-frontend-app.vercel.app'
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+// 3. The main API handler function
+export default async function handler(req) {
+  
+  // --- 3.1. ตอบกลับ OPTIONS (Preflight) request สำหรับ CORS ---
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  // --- 3.2. จำกัดให้รับเฉพาะ GET method ---
   if (req.method !== 'GET') {
-    res.setHeader('Allow', ['GET']);
-    return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
+    return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
+        status: 405, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
   }
 
   try {
-    // 3. Query ข้อมูลจากตาราง usage_types
-    const query = `
+    // 4. (!!! เปลี่ยน !!!)
+    //    ใช้ 'DATABASE_URL' ที่ Vercel-Neon Integration ใส่ให้
+    const sql = neon(process.env.DATABASE_URL); 
+
+    // 5. (!!! เปลี่ยน !!!)
+    //    Query ข้อมูลจากตาราง usage_types
+    const query = sql`
       SELECT 
         usage_type_id AS value, 
         type_label AS label 
@@ -25,14 +45,20 @@ export default async function handler(req, res) {
       ORDER BY type_label;
     `;
     
-    const { rows } = await pool.query(query);
+    const rows = await query;
 
-    // 4. ส่งข้อมูลกลับเป็น JSON
-    //    ผลลัพธ์จะเป็น: [{ value: "uuid-...", label: "กู้ภัย" }, ...]
-    return res.status(200).json(rows);
+    // 6. (!!! เปลี่ยน !!!)
+    //    ส่งข้อมูลกลับด้วย 'new Response()'
+    return new Response(JSON.stringify(rows), { 
+        status: 200, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
 
   } catch (error) {
-    console.error('Database Error:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    console.error('API Error (usage-types):', error);
+    return new Response(JSON.stringify({ message: 'Database query failed', error: error.message }), { 
+        status: 500, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
   }
 }
