@@ -25,10 +25,18 @@ export default async function handler(req) {
   // --- Logic หลักสำหรับ HTTP POST (เมื่อมีการสร้างองค์กร) ---
   if (req.method === 'POST') {
     try {
-      // 1. รับข้อมูล organization_code และ organization_name จาก Frontend
-      const { organization_code, organization_name } = await req.json();
+      // [!! แก้ไข !!]
+      // 1. รับข้อมูล organization_code, organization_name 
+      //    และ UUIDs ใหม่ 2 ตัวจาก Frontend
+      const { 
+        organization_code, 
+        organization_name, 
+        org_type_id, 
+        usage_type_id 
+      } = await req.json();
 
-      // ตรวจสอบว่าได้รับข้อมูลครบถ้วนหรือไม่
+      // ตรวจสอบว่าได้รับข้อมูล "หลัก" ครบถ้วนหรือไม่
+      // (org_type_id และ usage_type_id อาจเป็น null ได้ ถ้า DB อนุญาต)
       if (!organization_code || !organization_name) {
         return new Response(JSON.stringify({ message: 'organization_code and organization_name are required' }), { 
             status: 400, // Bad Request
@@ -52,9 +60,23 @@ export default async function handler(req) {
         });
       } else {
         // --- กรณีที่ 2: ไม่ซ้ำ -> สร้างองค์กรใหม่ ---
+        
+        // [!! แก้ไข !!]
+        // เพิ่ม org_type_id และ usage_type_id เข้าไปในคำสั่ง INSERT
+        // ใช้ || null เพื่อป้องกัน error หาก frontend ส่ง "undefined" หรือ "" (ค่าว่าง) มา
         const newOrg = await sql`
-          INSERT INTO organizations (organization_code, organization_name) 
-          VALUES (${organization_code}, ${organization_name}) 
+          INSERT INTO organizations (
+            organization_code, 
+            organization_name,
+            org_type_id,
+            usage_type_id
+          ) 
+          VALUES (
+            ${organization_code}, 
+            ${organization_name},
+            ${org_type_id || null},
+            ${usage_type_id || null}
+          ) 
           RETURNING *; -- RETURNING * เพื่อส่งข้อมูลที่เพิ่งสร้างกลับไป
         `;
         
