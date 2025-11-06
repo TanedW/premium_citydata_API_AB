@@ -75,13 +75,13 @@ export default async function handler(req, res) {
     //    คุณอาจต้องปรับแก้ส่วนนี้หลังจากทดสอบจริง
     
     // OSM 'state' มักจะเป็น 'จังหวัด'
-    const province = address.state || ''; 
+    const province = address.province || ''; 
 
     // 'อำเภอ' อาจจะเป็น 'city', 'county', หรือ 'city_district'
-    const district = address.city || address.county || address.city_district || '';
+    const district = address.town || address.county || address.district || '';
 
     // 'ตำบล' อาจจะเป็น 'suburb', 'village', หรือ 'town'
-    const sub_district = address.suburb || address.village || address.town || '';
+    const sub_district = address.suburb || address.municipality || address.village || address.town || address.city || '';
 
     const formattedData = {
       province: province,
