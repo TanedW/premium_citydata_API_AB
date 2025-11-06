@@ -78,10 +78,10 @@ export default async function handler(req, res) {
     const province = address.province || ''; 
 
     // 'อำเภอ' อาจจะเป็น 'city', 'county', หรือ 'city_district'
-    const district = address.town || address.county || address.district || '';
+    const district = address.county || address.town || address.district || '';
 
     // 'ตำบล' อาจจะเป็น 'suburb', 'village', หรือ 'town'
-    const sub_district = address.suburb || address.municipality || address.village || address.town || address.city || '';
+    const sub_district = address.city_district || address.suburb || address.municipality || address.village || address.town || address.city || '';
 
     const formattedData = {
       province: province,
