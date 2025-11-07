@@ -69,7 +69,7 @@ export default async function handler(req) {
 
       // ดึงข้อมูลประกอบทั้งหมดเพื่อแมป
       const [issueTypes, caseOrgs, orgs] = await Promise.all([
-        sql`SELECT issue_id, issue_name FROM issue_types;`,
+        sql`SELECT issue_id, name FROM issue_types;`,
         sql`SELECT issue_cases_id, organization_id FROM case_organization;`,
         sql`SELECT organization_id, organization_name FROM organization;`,
       ]);
@@ -82,7 +82,7 @@ export default async function handler(req) {
 
         return {
           ...c,
-          issue_type_name: type ? type.issue_name : 'ไม่ทราบประเภท',
+          issue_type_name: type ? type.name : 'ไม่ทราบประเภท',
           responsible_unit: org ? org.organization_name : '-',
         };
       });
