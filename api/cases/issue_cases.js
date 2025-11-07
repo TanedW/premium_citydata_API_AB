@@ -39,7 +39,7 @@ export default async function handler(req) {
   const sql = neon(process.env.DATABASE_URL);
 
   // ============================================================
-  // 1️⃣ GET — ดึงข้อมูลเคสทั้งหมด (รวมประเภทและหน่วยงาน)
+  // 1️⃣ GET — ดึงข้อมูลเคสทั้งหมด (รวมประเภทและหน่วยงาน) [⭐️ปรับปรุงแล้ว⭐️]
   // ============================================================
   if (req.method === 'GET') {
     try {
@@ -74,17 +74,34 @@ export default async function handler(req) {
         sql`SELECT organization_id, organization_name FROM organizations;`,
       ]);
 
+      // สร้าง Map เพื่อให้ค้นหาข้อมูล orgs ได้เร็วขึ้น
+      const orgsMap = new Map(
+        orgs.map((o) => [o.organization_id, o.organization_name])
+      );
+
       // รวมข้อมูล
       const merged = cases.map((c) => {
         const type = issueTypes.find((t) => t.issue_id === c.issue_type_id);
-        const co = caseOrgs.find((co) => co.case_id === c.issue_case_id);
-        const org = orgs.find((o) => o.organization_id === co?.organization_id);
+
+        // [ปรับปรุง] ใช้ filter เพื่อหาทุกหน่วยงานที่ตรงกัน
+        const responsibleOrgs = caseOrgs
+          .filter((co) => co.case_id === c.issue_case_id)
+          .map((co) => {
+            const orgName = orgsMap.get(co.organization_id);
+            if (orgName) {
+              return {
+                organization_id: co.organization_id,
+                organization_name: orgName,
+              };
+            }
+            return null; // กรองเคสที่ data ไม่ตรง
+          })
+          .filter(Boolean); // กรองค่า null ออก
 
         return {
           ...c,
-          orgid: org ? org.organization_id:'-',
           issue_type_name: type ? type.name : 'ไม่ทราบประเภท',
-          responsible_unit: org ? org.organization_name : '-',
+          organizations: responsibleOrgs, // [ปรับปรุง] เปลี่ยนเป็น array
         };
       });
 
