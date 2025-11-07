@@ -53,7 +53,7 @@ export default async function handler(req) {
         cases = await sql`
           SELECT ic.*
           FROM issue_cases ic
-          JOIN case_organizations co ON ic.issue_cases_id = co.issue_cases_id
+          JOIN case_organizations co ON ic.issue_cases_id = co.cases_id
           WHERE co.organization_id = ${organization_id}
           ORDER BY ic.created_at DESC
           LIMIT 100;
@@ -77,7 +77,7 @@ export default async function handler(req) {
       // รวมข้อมูล
       const merged = cases.map((c) => {
         const type = issueTypes.find((t) => t.issue_id === c.issue_type_id);
-        const co = caseOrgs.find((co) => co.case_id === c.case_id);
+        const co = caseOrgs.find((co) => co.case_id === c.issue_case_id);
         const org = orgs.find((o) => o.organization_id === co?.organization_id);
 
         return {
