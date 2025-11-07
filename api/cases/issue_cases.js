@@ -83,25 +83,24 @@ export default async function handler(req) {
       const merged = cases.map((c) => {
         const type = issueTypes.find((t) => t.issue_id === c.issue_type_id);
 
-        // [ปรับปรุง] ใช้ filter เพื่อหาทุกหน่วยงานที่ตรงกัน
+        // [⭐️⭐️⭐️ จุดที่แก้ไข ⭐️⭐️⭐️]
+        // ใช้ .map โดยตรง และไม่กรอง null ทิ้ง
         const responsibleOrgs = caseOrgs
           .filter((co) => co.case_id === c.issue_case_id)
           .map((co) => {
             const orgName = orgsMap.get(co.organization_id);
-            if (orgName) {
-              return {
-                organization_id: co.organization_id,
-                organization_name: orgName,
-              };
-            }
-            return null; // กรองเคสที่ data ไม่ตรง
-          })
-          .filter(Boolean); // กรองค่า null ออก
+            return {
+              organization_id: co.organization_id,
+              // ถ้าไม่เจอชื่อ ให้แสดงค่า default แทนที่จะเป็น null
+              organization_name: orgName || 'ไม่พบชื่อหน่วยงาน', 
+            };
+          });
+        // [⭐️⭐️⭐️ ลบ .filter(Boolean) ออกไปแล้ว ⭐️⭐️⭐️]
 
         return {
           ...c,
           issue_type_name: type ? type.name : 'ไม่ทราบประเภท',
-          organizations: responsibleOrgs, // [ปรับปรุง] เปลี่ยนเป็น array
+          organizations: responsibleOrgs, 
         };
       });
 
