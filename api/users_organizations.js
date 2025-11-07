@@ -62,18 +62,7 @@ export default async function handler(req) {
       if (user_id) {
         // Case 1: ค้นหาทุก organization ที่ user คนนี้อยู่
         queryResult = await sql`
-          SELECT 
-              u.user_id,
-              u.first_name,
-              u.last_name,
-              o.organization_id,
-              o.organization_name,
-              o.organization_code,
-              o.url_logo
-          FROM users u
-          JOIN users_organizations uo ON u.user_id = uo.user_id
-          JOIN organizations o ON uo.organization_code = o.organization_code
-          WHERE u.user_id = ${user_id};
+          SELECT * FROM view_user_org_details WHERE "user_id" = ${user_id};
         `;
       } else if (organization_code) {
         // Case 2: ค้นหาทุก user ที่อยู่ใน organization นี้
