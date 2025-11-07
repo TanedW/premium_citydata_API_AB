@@ -53,7 +53,7 @@ export default async function handler(req) {
         cases = await sql`
           SELECT ic.*
           FROM issue_cases ic
-          JOIN case_organizations co ON ic.issue_id = co.issue_id
+          JOIN case_organizations co ON ic.issue_cases_id = co.issue_cases_id
           WHERE co.organization_id = ${organization_id}
           ORDER BY ic.created_at DESC
           LIMIT 100;
@@ -70,7 +70,7 @@ export default async function handler(req) {
       // ดึงข้อมูลประกอบทั้งหมดเพื่อแมป
       const [issueTypes, caseOrgs, orgs] = await Promise.all([
         sql`SELECT issue_id, name FROM issue_types;`,
-        sql`SELECT issue_id, organization_id FROM case_organizations;`,
+        sql`SELECT case_id organization_id FROM case_organizations;`,
         sql`SELECT organization_id, organization_name FROM organizations;`,
       ]);
 
@@ -149,7 +149,7 @@ export default async function handler(req) {
       // Step 1: Insert issue_cases
       await sql`
         INSERT INTO issue_cases (
-          issue_id, case_code, title, description, cover_image_url,
+          issue_case_id, case_code, title, description, cover_image_url,
           issue_type_id, latitude, longitude, tags, status
         ) VALUES (
           ${newCaseId}, ${caseCode}, ${title}, ${description}, ${cover_image_url},
@@ -161,7 +161,7 @@ export default async function handler(req) {
       if (organization_ids && organization_ids.length > 0) {
         for (const orgId of organization_ids) {
           await sql`
-            INSERT INTO case_organizations (issue_id, organization_id, is_viewed)
+            INSERT INTO case_organizations (case_id, organization_id, is_viewed)
             VALUES (${newCaseId}, ${orgId}, false);
           `;
         }
