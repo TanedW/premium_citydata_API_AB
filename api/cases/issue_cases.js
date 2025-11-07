@@ -70,7 +70,7 @@ export default async function handler(req) {
       // ดึงข้อมูลประกอบทั้งหมดเพื่อแมป
       const [issueTypes, caseOrgs, orgs] = await Promise.all([
         sql`SELECT issue_id, name FROM issue_types;`,
-        sql`SELECT case_id organization_id FROM case_organizations;`,
+        sql`SELECT case_id ,organization_id FROM case_organizations;`,
         sql`SELECT organization_id, organization_name FROM organizations;`,
       ]);
 
