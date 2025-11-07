@@ -70,14 +70,14 @@ export default async function handler(req) {
       // ดึงข้อมูลประกอบทั้งหมดเพื่อแมป
       const [issueTypes, caseOrgs, orgs] = await Promise.all([
         sql`SELECT issue_id, name FROM issue_types;`,
-        sql`SELECT case_id ,organization_id FROM case_organizations;`,
+        sql`SELECT case_id, organization_id FROM case_organizations;`,
         sql`SELECT organization_id, organization_name FROM organizations;`,
       ]);
 
       // รวมข้อมูล
       const merged = cases.map((c) => {
         const type = issueTypes.find((t) => t.issue_id === c.issue_type_id);
-        const co = caseOrgs.find((co) => co.case_id === c.issue_case_id);
+        const co = caseOrgs.find((co) => co.case_id === c.case_id);
         const org = orgs.find((o) => o.organization_id === co?.organization_id);
 
         return {
