@@ -53,7 +53,7 @@ export default async function handler(req) {
         cases = await sql`
           SELECT ic.*
           FROM issue_cases ic
-          JOIN case_organizations co ON ic.issue_cases_id = co.issue_cases_id
+          JOIN case_organizations co ON ic.issue_cases_id = co.case_id
           WHERE co.organization_id = ${organization_id}
           ORDER BY ic.created_at DESC
           LIMIT 100;
@@ -70,21 +70,47 @@ export default async function handler(req) {
       // ดึงข้อมูลประกอบทั้งหมดเพื่อแมป
       const [issueTypes, caseOrgs, orgs] = await Promise.all([
         sql`SELECT issue_id, name FROM issue_types;`,
-        sql`SELECT case_id ,organization_id FROM case_organizations;`,
+        // case_id ในตารางนี้คือ issue_cases_id (UUID)
+        sql`SELECT case_id, organization_id FROM case_organizations;`,
         sql`SELECT organization_id, organization_name FROM organizations;`,
       ]);
 
       // รวมข้อมูล
       const merged = cases.map((c) => {
+        // 1. หาประเภท (อันนี้ถูกต้อง)
         const type = issueTypes.find((t) => t.issue_id === c.issue_type_id);
-        const co = caseOrgs.find((co) => co.issue_id === c.issue_id);
-        const org = orgs.find((o) => o.organization_id === co?.organization_id);
 
+        // 2. (ที่แก้ไข) หา "ลิงก์" ทั้งหมดที่เชื่อมเคสนี้กับหน่วยงาน
+        //    (Code เดิม: .find((co) => co.issue_id === c.issue_id) <-- นี่คือจุดที่ผิด)
+        //    (Code แก้ไข: .filter((co) => co.case_id === c.issue_cases_id))
+        const relatedLinks = caseOrgs.filter(
+          (co) => co.case_id === c.issue_cases_id
+        );
+
+        // 3. (ที่แก้ไข) แปลง "ลิงก์" ทั้งหมดให้เป็น "ข้อมูลหน่วยงาน" จริง
+        const relatedOrgs = relatedLinks.map((link) => {
+          const orgData = orgs.find(
+            (o) => o.organization_id === link.organization_id
+          );
+
+          if (orgData) {
+            return {
+              orgid: orgData.organization_id,
+              responsible_unit: orgData.organization_name,
+            };
+          }
+          // กรณีหา orgData ไม่เจอ (เช่น หน่วยงานถูกลบ แต่ลิงก์ยังอยู่)
+          return {
+            orgid: link.organization_id,
+            responsible_unit: 'ไม่พบข้อมูลหน่วยงาน',
+          };
+        });
+
+        // 4. (ที่แก้ไข) คืน object ที่มี array ของ organizations
         return {
           ...c,
-          orgid: org ? org.organization_id:'-',
           issue_type_name: type ? type.name : 'ไม่ทราบประเภท',
-          responsible_unit: org ? org.organization_name : '-',
+          organizations: relatedOrgs, // แทนที่ orgid และ responsible_unit เดิม
         };
       });
 
