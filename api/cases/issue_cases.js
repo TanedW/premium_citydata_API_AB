@@ -77,10 +77,8 @@ export default async function handler(req) {
       // รวมข้อมูล
       const merged = cases.map((c) => {
         const type = issueTypes.find((t) => t.issue_id === c.issue_type_id);
-
-        const co = caseOrgs.find((co) => co.case_id == c.issue_case_id); 
-        const org = orgs.find((o) => o.organization_id == co?.organization_id);
-
+        const co = caseOrgs.find((co) => co.issue_id === c.issue_id);
+        const org = orgs.find((o) => o.organization_id === co?.organization_id);
 
         return {
           ...c,
