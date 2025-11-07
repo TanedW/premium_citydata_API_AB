@@ -71,7 +71,7 @@ export default async function handler(req) {
       const [issueTypes, caseOrgs, orgs] = await Promise.all([
         sql`SELECT issue_id, name FROM issue_types;`,
         sql`SELECT issue_id, organization_id FROM case_organizations;`,
-        sql`SELECT organization_id, organization_name FROM organization;`,
+        sql`SELECT organization_id, organization_name FROM organizations;`,
       ]);
 
       // รวมข้อมูล
