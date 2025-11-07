@@ -82,7 +82,7 @@ export default async function handler(req) {
 
         return {
           ...c,
-          orgid: org,
+          orgid: type ? org.organization_id,
           issue_type_name: type ? type.name : 'ไม่ทราบประเภท',
           responsible_unit: org ? org.organization_name : '-',
         };
