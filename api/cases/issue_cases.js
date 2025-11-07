@@ -40,7 +40,6 @@ export default async function handler(req) {
 
   // ============================================================
   // 1️⃣ GET — ดึงข้อมูลเคสทั้งหมด (รวมประเภทและหน่วยงาน)
-  // [🌟 UPDATED BLOCK 🌟]
   // ============================================================
   if (req.method === 'GET') {
     try {
@@ -54,7 +53,7 @@ export default async function handler(req) {
         cases = await sql`
           SELECT ic.*
           FROM issue_cases ic
-          JOIN case_organizations co ON ic.issue_case_id = co.case_id
+          JOIN case_organizations co ON ic.issue_cases_id = co.issue_cases_id
           WHERE co.organization_id = ${organization_id}
           ORDER BY ic.created_at DESC
           LIMIT 100;
@@ -71,45 +70,21 @@ export default async function handler(req) {
       // ดึงข้อมูลประกอบทั้งหมดเพื่อแมป
       const [issueTypes, caseOrgs, orgs] = await Promise.all([
         sql`SELECT issue_id, name FROM issue_types;`,
-        // ⚠️ FIXED: ต้องดึงทั้ง case_id และ organization_id
-        sql`SELECT case_id, organization_id FROM case_organizations;`,
+        sql`SELECT case_id ,organization_id FROM case_organizations;`,
         sql`SELECT organization_id, organization_name FROM organizations;`,
       ]);
 
       // รวมข้อมูล
       const merged = cases.map((c) => {
-        // 1. หา type (เหมือนเดิม)
         const type = issueTypes.find((t) => t.issue_id === c.issue_type_id);
+        const co = caseOrgs.find((co) => co.case_id === c.issue_case_id);
+        const org = orgs.find((o) => o.organization_id === co?.organization_id);
 
-        // 2. 🌟 CHANGED: หาทุก organizations ที่เกี่ยวข้อง (ใช้ .filter)
-        const relatedCaseOrgs = caseOrgs.filter(
-          // ⚠️ FIXED: แก้ไขการจับคู่ key ให้ถูกต้อง
-          (co) => co.case_id === c.issue_case_id
-        );
-
-        // 3. 🌟 CHANGED: ดึงข้อมูล organizations ฉบับเต็ม (ใช้ .map)
-        const responsible_organizations = relatedCaseOrgs
-          .map((co) => {
-            // หาข้อมูล org เต็มๆ จาก array 'orgs'
-            return orgs.find((o) => o.organization_id === co.organization_id);
-          })
-          .filter(Boolean); // .filter(Boolean) กัน Error หากหาไม่เจอ (เช่น org ถูกลบไปแล้ว)
-
-        // 4. 🌟 CHANGED: สร้างผลลัพธ์
         return {
           ...c,
+          orgid: org ? org.organization_id:'-',
           issue_type_name: type ? type.name : 'ไม่ทราบประเภท',
-
-          // Field ใหม่: ส่งกลับเป็น Array ของ Objects
-          responsible_organizations: responsible_organizations,
-
-          // Field ใหม่: ส่งกลับเป็น String ที่อ่านง่าย (เช่น "เทศบาล A, เทศบาล B")
-          responsible_units_display:
-            responsible_organizations.length > 0
-              ? responsible_organizations
-                  .map((o) => o.organization_name)
-                  .join(', ')
-              : '-',
+          responsible_unit: org ? org.organization_name : '-',
         };
       });
 
