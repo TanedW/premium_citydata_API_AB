@@ -3,46 +3,32 @@ Entity-Relationship Diagram (ERD)
 
 ```mermaid
 erDiagram
+    %% --- ตารางหลัก (Entities) ---
+
     users {
-        int user_id PK "User ID"
-        string email
-        string first_name
-        string last_name
-        string access_token
-        timestamp created_at
-        array providers
-    }
-
-    organizations {
-        int organization_id PK "Organization ID"
-        string organization_code
-        string organization_name
-        timestamp created_at
-    }
-
-    user_logs {
-        int log_id PK "Log ID"
-        int user_id
-        text action_type
-        text provider
-        float ip_address
-        timestamp created_at
-    }
-
-    users_organizations {
-        int user_id PK, FK "User ID"
-        int organization_id PK, FK "Organization ID"
-        string role
-        timestamp joined_at
-    }
-        users {
         INTEGER user_id PK
-        TEXT username "..."
+        TEXT email
+        TEXT first_name
+        TEXT last_name
+        TEXT access_token
+        TIMESTAMPTZ created_at
+        TEXT[] providers
     }
 
     organizations {
         INTEGER organization_id PK
-        TEXT name "..."
+        TEXT organization_code UK
+        TEXT organization_name
+        TIMESTAMPTZ created_at
+        TEXT url_logo
+        INTEGER org_type_id FK
+        INTEGER usage_type_id
+    }
+
+    organization_types {
+        SERAIL org_type_id PK
+        TEXT type_value
+        TEXT type_label
     }
 
     issue_types {
@@ -54,12 +40,12 @@ erDiagram
 
     issue_cases {
         UUID issue_cases_id PK
-        VARCHAR(11) case_code
+        VARCHAR(7) case_code
         TEXT title
         TEXT description
         TEXT cover_image_url
         UUID issue_type_id FK
-        case_status status
+        TEXT status "enum: case_status"
         NUMERIC latitude
         NUMERIC longitude
         TEXT[] tags
@@ -67,10 +53,30 @@ erDiagram
         TIMESTAMPTZ updated_at
     }
 
+    %% --- ตารางเชื่อมโยงและตารางย่อย (Junction & Detail Tables) ---
+
+    user_log {
+        SERAIL log_id PK
+        INTEGER user_id FK
+        TEXT action_type
+        TEXT provider
+        TEXT ip_address
+        TEXT user_agent
+        TEXT status
+        TIMESTAMPTZ created_at
+    }
+
+    users_organizations {
+        INTEGER user_id PK, FK
+        TEXT organization_code PK, FK
+        TEXT role
+        TIMESTAMPTZ joined_at
+    }
+
     case_media {
         UUID id PK
         UUID case_id FK
-        media_type media_type
+        TEXT media_type
         TEXT url
         TIMESTAMPTZ created_at
     }
@@ -85,27 +91,32 @@ erDiagram
         BIGSERIAL log_id PK
         UUID case_id FK
         INTEGER changed_by_user_id FK
-        case_activity_type activity_type
+        TEXT activity_type "enum: case_activity_type"
         TEXT old_value
         TEXT new_value
         TEXT comment
         TIMESTAMPTZ created_at
     }
 
-    users ||--|{ users_organizations : "has"
-    users }|--|| user_logs : "logs"
-    organizations ||--|{ users_organizations : "has"
-    issue_cases }o--|| issue_types : "has type"
+    %% --- ความสัมพันธ์ (Relationships) ---
 
-    issue_cases ||--|{ case_media : "has media"
+    %% 1. Users, Organizations, and Logs
+    users               ||--|{ user_log : "has"
+    organization_types  ||--|{ organizations : "classifies"
 
-    issue_cases ||--|{ case_activity_logs : "has logs"
+    %% 2. Many-to-Many: users <-> organizations (via users_organizations)
+    users               ||--o{ users_organizations : "is_member_of"
+    organizations       ||--o{ users_organizations : "has_member"
 
-    users }o--|{ case_activity_logs : "changed by"
+    %% 3. Issues, Cases, and related activities (ที่คุณกำหนดมา)
+    issue_cases         }o--|| issue_types : "has type"
+    issue_cases         ||--|{ case_media : "has media"
+    issue_cases         ||--|{ case_activity_logs : "has logs"
+    users               }o--|{ case_activity_logs : "changed by"
 
-    issue_cases ||--o{ case_organizations : "assigned to"
-    organizations ||--o{ case_organizations : "responsible for"
-```
+    %% 4. Many-to-Many: issue_cases <-> organizations (via case_organizations)
+    issue_cases         ||--o{ case_organizations : "assigned to"
+    organizations       ||--o{ case_organizations : "responsible for"
 
 คำอธิบายตาราง (Entities)
 1. users
