@@ -7,7 +7,7 @@ export const config = {
 // --- CORS Headers ---
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // <-- URL ของ React App
-  'Access-Control-Allow-Methods': 'GET, OPTIONS', // อนุญาตแค่ GET และ OPTIONS
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -23,8 +23,7 @@ export default async function handler(req) {
     const sql = neon(process.env.DATABASE_URL);
 
     try {
-      // 3. [สำคัญ] ตรวจสอบสิทธิ์ (เหมือน API อื่นๆ)
-      // เราควรให้เฉพาะผู้ใช้ที่ Login แล้วเท่านั้นที่เห็นสถิติ
+      // 3. [สำคัญ] ตรวจสอบสิทธิ์ (เหมือนเดิม)
       const authHeader = req.headers.get('authorization');
       const accessToken = (authHeader && authHeader.startsWith('Bearer ')) 
         ? authHeader.split(' ')[1] 
@@ -46,20 +45,33 @@ export default async function handler(req) {
         });
       }
       
-      // 4. [Query หลัก] นับจำนวนเคส โดยจัดกลุ่มตาม status
+      // 4. (*** MODIFIED ***) ดึง organization_id จาก Query String
+      const { searchParams } = new URL(req.url, `https:${req.headers.host}`);
+      const organizationId = searchParams.get('organization_id');
+
+      if (!organizationId) {
+        return new Response(JSON.stringify({ message: 'organization_id query parameter is required' }), { 
+          status: 400, // Bad Request
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
+      }
+
+      // 5. (*** MODIFIED ***) Query หลัก - นับจำนวนเคส โดย JOIN และกรองด้วย organization_id
       const statsResult = await sql`
         SELECT 
-          status, 
-          COUNT(*) AS count
+          ic.status, 
+          COUNT(ic.issue_cases_id) AS count
         FROM 
-          issue_cases
+          issue_cases ic
+        JOIN 
+          case_organizations co ON ic.issue_cases_id = co.case_id
+        WHERE 
+          co.organization_id = ${organizationId}
         GROUP BY 
-          status;
+          ic.status;
       `;
       
-      // 5. ส่งข้อมูลกลับ
-      // ผลลัพธ์จะเป็น Array เช่น:
-      // [ { "status": "pending", "count": "15" }, { "status": "completed", "count": "120" } ]
+      // 6. ส่งข้อมูลกลับ
       return new Response(JSON.stringify(statsResult), { 
         status: 200, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
