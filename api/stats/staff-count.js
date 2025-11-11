@@ -56,12 +56,13 @@ export default async function handler(req) {
         });
       }
 
-      // 5. [Query หลัก] นับจำนวน User ในตาราง users_organizations
+      // 5. [Query หลัก - แก้ไขแล้ว]
+      // เปลี่ยนจาก FROM users_organizations เป็น FROM users
       const statsResult = await sql`
         SELECT 
           COUNT(user_id) AS staff_count
         FROM 
-          users_organizations
+          users
         WHERE 
           organization_id = ${organizationId};
       `;
