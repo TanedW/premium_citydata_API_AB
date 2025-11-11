@@ -23,7 +23,7 @@ export default async function handler(req) {
     const sql = neon(process.env.DATABASE_URL);
 
     try {
-      // 3. [สำคัญ] ตรวจสอบสิทธิ์ (เหมือน API อื่นๆ)
+      // 3. [สำคัญ] ตรวจสอบสิทธิ์
       const authHeader = req.headers.get('authorization');
       const accessToken = (authHeader && authHeader.startsWith('Bearer ')) 
         ? authHeader.split(' ')[1] 
@@ -45,7 +45,7 @@ export default async function handler(req) {
         });
       }
       
-      // 4. ดึง organization_id จาก Query String
+      // 4. ดึง organization_id (ที่เป็น Integer) จาก Query String
       const { searchParams } = new URL(req.url, `https:${req.headers.host}`);
       const organizationId = searchParams.get('organization_id');
 
@@ -57,14 +57,20 @@ export default async function handler(req) {
       }
 
       // 5. [Query หลัก - แก้ไขแล้ว]
-      // เปลี่ยนจาก FROM users_organizations เป็น FROM users
+      // ใช้ Subquery เพื่อแปลง organization_id (int) -> organization_code (varchar)
+      // แล้วค่อยนับในตาราง users_organizations
       const statsResult = await sql`
         SELECT 
           COUNT(user_id) AS staff_count
         FROM 
-          users
+          users_organizations
         WHERE 
-          organization_id = ${organizationId};
+          organization_code = (
+            SELECT organization_code 
+            FROM organizations
+            WHERE organization_id = ${organizationId}
+            LIMIT 1
+          );
       `;
       
       // 6. ส่งข้อมูลกลับ
@@ -76,6 +82,13 @@ export default async function handler(req) {
 
     } catch (error) {
       console.error("--- STATS STAFF-COUNT API ERROR ---", error);
+      // (เพิ่มการตรวจสอบ Error ใหม่)
+      if (error.message && error.message.includes('subquery returned no rows')) {
+        return new Response(JSON.stringify({ "staff_count": "0" }), { 
+            status: 200, // ถือว่าหาเจอ (เจอ 0 คน)
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
       return new Response(JSON.stringify({ message: 'An internal error occurred', error: error.message }), { 
         status: 500, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
