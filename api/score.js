@@ -96,12 +96,12 @@ export default async function handler(req) {
         });
       }
 
-      const { issue_cases_id, score, comment } = body;
+      const { issue_case_id, score, comment } = body;
 
       // 4. ตรวจสอบข้อมูล (Validation)
-      if (!issue_cases_id || !score) {
+      if (!issue_case_id || !score) {
         logStatus = 'FAILED_VALIDATION';
-        logDescription = 'Missing issue_cases_id or score';
+        logDescription = 'Missing issue_case_id or score';
         await saveUserLog(sql, {
           userId: logUserId, actionType: 'CREATE_RATING', provider: null, 
           ipAddress, userAgent, status: logStatus, description: logDescription
@@ -126,14 +126,14 @@ export default async function handler(req) {
       // 5. บันทึกข้อมูลลง DB
       // (เราใช้ logUserId ที่ได้จาก Token, ไม่เชื่อ user_id จาก body)
       const newRatingResult = await sql`
-        INSERT INTO case_ratings (issue_cases_id, user_id, score, comment)
-        VALUES (${issue_cases_id}, ${logUserId}, ${score}, ${comment || null})
+        INSERT INTO case_ratings (issue_case_id, user_id, score, comment)
+        VALUES (${issue_case_id}, ${logUserId}, ${score}, ${comment || null})
         RETURNING *;
       `;
       
       const newRating = newRatingResult[0];
       logStatus = 'SUCCESS';
-      logDescription = `Rating created with ID: ${newRating.id} for case: ${issue_cases_id}`;
+      logDescription = `Rating created with ID: ${newRating.id} for case: ${issue_case_id}`;
       
       // 6. บันทึก Log สำเร็จ
       await saveUserLog(sql, {
@@ -172,7 +172,7 @@ export default async function handler(req) {
   // -----------------------------------------------------------------
   if (req.method === 'GET') {
     try {
-        // ดึง issue_cases_id จาก query parameter
+        // ดึง issue_case_id จาก query parameter
         // เช่น /api/ratings?case_id=123
         const { searchParams } = new URL(req.url, `https:${req.headers.host}`);
         const caseId = searchParams.get('case_id');
@@ -189,9 +189,9 @@ export default async function handler(req) {
             SELECT 
                 AVG(score) AS average_score, 
                 COUNT(*) AS total_ratings,
-                (SELECT score FROM case_ratings WHERE issue_cases_id = ${caseId} ORDER BY created_at DESC LIMIT 1) as latest_score
+                (SELECT score FROM case_ratings WHERE issue_case_id = ${caseId} ORDER BY created_at DESC LIMIT 1) as latest_score
             FROM case_ratings 
-            WHERE issue_cases_id = ${caseId};
+            WHERE issue_case_id = ${caseId};
         `;
         
         const ratingData = result[0];
