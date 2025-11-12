@@ -57,42 +57,37 @@ export default async function handler(req) {
       }
 
       // 5. [Query หลัก] - เราต้องรัน 2 Queries
+      
       // 5.1 Query แรก: คำนวณค่าเฉลี่ย (AVG) และจำนวนรวม (COUNT)
+      // (*** นี่คือ Query ที่แก้ไขแล้ว ***)
       const aggregatesResult = await sql`
-        WITH OrgCode AS (
-          SELECT organization_code 
-          FROM organizations
-          WHERE organization_id = ${organizationId}
-          LIMIT 1
-        )
         SELECT
             COUNT(r.score) AS total_count,
             AVG(r.score) AS overall_average
         FROM 
             case_ratings r
         JOIN 
-            issue_cases c ON r.issue_case_id= c.issue_cases_id
+            issue_cases c ON r.issue_case_id = c.issue_cases_id
+        JOIN
+            case_organizations co ON c.issue_cases_id = co.case_id
         WHERE 
-            c.organization_code = (SELECT organization_code FROM OrgCode);
+            co.organization_id = ${organizationId};
       `;
       
       // 5.2 Query สอง: นับคะแนนแยกตามกลุ่ม (GROUP BY)
+      // (*** นี่คือ Query ที่แก้ไขแล้ว ***)
       const breakdownResult = await sql`
-        WITH OrgCode AS (
-          SELECT organization_code 
-          FROM organizations
-          WHERE organization_id = ${organizationId}
-          LIMIT 1
-        )
         SELECT 
             r.score, 
             COUNT(r.score) AS count
         FROM 
             case_ratings r
         JOIN 
-            issue_cases c ON r.issue_case_id= c.issue_cases_id -- (*** นี่คือ JOIN ที่ถูกต้อง ***)
+            issue_cases c ON r.issue_case_id = c.issue_cases_id
+        JOIN
+            case_organizations co ON c.issue_cases_id = co.case_id
         WHERE 
-            c.organization_code = (SELECT organization_code FROM OrgCode)
+            co.organization_id = ${organizationId}
         GROUP BY 
             r.score;
       `;
@@ -136,24 +131,11 @@ export default async function handler(req) {
 
     } catch (error) {
       console.error("--- STATS SATISFACTION API ERROR ---", error);
-      // ตรวจสอบ error กรณีหา organization_id ไม่เจอ (เหมือน API อื่น)
-      if (error.message && error.message.includes('subquery returned no rows')) {
-        // ถ้าหา org_id ไม่เจอ, ให้ส่งค่า 0 กลับไป
-         return new Response(JSON.stringify({
-            overall_average: 0,
-            total_count: 0,
-            breakdown: [
-                { score: 5, count: 0 },
-                { score: 4, count: 0 },
-                { score: 3, count: 0 },
-                { score: 2, count: 0 },
-                { score: 1, count: 0 }
-            ]
-         }), { 
-            status: 200, // ถือว่าถูกต้อง (แค่ไม่มีข้อมูล)
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
+      
+      // (*** ปรับปรุง Error Handling ***)
+      // Query ใหม่จะไม่โยน 'subquery returned no rows'
+      // ถ้าไม่เจอข้อมูล มันจะคืนค่า count: 0, avg: null ซึ่ง JS ด้านบน (6.1) จัดการเรียบร้อยแล้ว
+      // ดังนั้น ถ้ามาถึง catch block แสดงว่าเป็น Error ร้ายแรงจริง
       return new Response(JSON.stringify({ message: 'An internal error occurred', error: error.message }), { 
         status: 500, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
