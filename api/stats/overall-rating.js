@@ -71,7 +71,7 @@ export default async function handler(req) {
         FROM 
             case_ratings r
         JOIN 
-            issue_cases c ON r.case_id = c.case_id -- (*** นี่คือ JOIN ที่ถูกต้อง ***)
+            issue_cases c ON r.rating_id= c.case_id
         WHERE 
             c.organization_code = (SELECT organization_code FROM OrgCode);
       `;
@@ -90,7 +90,7 @@ export default async function handler(req) {
         FROM 
             case_ratings r
         JOIN 
-            issue_cases c ON r.case_id = c.case_id -- (*** นี่คือ JOIN ที่ถูกต้อง ***)
+            issue_cases c ON r.rating_id= c.case_id -- (*** นี่คือ JOIN ที่ถูกต้อง ***)
         WHERE 
             c.organization_code = (SELECT organization_code FROM OrgCode)
         GROUP BY 
