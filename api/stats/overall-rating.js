@@ -71,7 +71,7 @@ export default async function handler(req) {
         FROM 
             case_ratings r
         JOIN 
-            issue_cases c ON r.case_id = c.id -- (*** MODIFIED ***)
+            issue_cases c ON r.rating_id= c.id -- (*** MODIFIED ***)
         WHERE 
             c.organization_code = (SELECT organization_code FROM OrgCode);
       `;
@@ -90,7 +90,7 @@ export default async function handler(req) {
         FROM 
             case_ratings r
         JOIN 
-            issue_cases c ON r.case_id = c.id -- (*** MODIFIED ***)
+            issue_cases c ON r.rating_id = c.id -- (*** MODIFIED ***)
         WHERE 
             c.organization_code = (SELECT organization_code FROM OrgCode)
         GROUP BY 
