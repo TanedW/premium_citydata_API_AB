@@ -58,7 +58,6 @@ export default async function handler(req) {
 
       // 5. [Query หลัก] - เราต้องรัน 2 Queries
       // 5.1 Query แรก: คำนวณค่าเฉลี่ย (AVG) และจำนวนรวม (COUNT)
-      // (เราใช้ CTE เพื่อหา organization_code ก่อน)
       const aggregatesResult = await sql`
         WITH OrgCode AS (
           SELECT organization_code 
@@ -72,7 +71,7 @@ export default async function handler(req) {
         FROM 
             case_ratings r
         JOIN 
-            issue_cases c ON r.issue_cases_id = c.issue_cases_id
+            issue_cases c ON r.case_id = c.id -- (*** MODIFIED ***)
         WHERE 
             c.organization_code = (SELECT organization_code FROM OrgCode);
       `;
@@ -91,7 +90,7 @@ export default async function handler(req) {
         FROM 
             case_ratings r
         JOIN 
-            issue_cases c ON r.issue_cases_id = c.issue_cases_id
+            issue_cases c ON r.case_id = c.id -- (*** MODIFIED ***)
         WHERE 
             c.organization_code = (SELECT organization_code FROM OrgCode)
         GROUP BY 
@@ -117,7 +116,6 @@ export default async function handler(req) {
       });
       
       // 6.3 สร้าง Array breakdown ที่ครบ 5 ระดับ (1-5 ดาว)
-      // เพื่อป้องกันกรณีที่บางคะแนนไม่มีคนโหวต (เช่น ไม่มีคนโหวต 1 ดาว)
       const fullBreakdown = [5, 4, 3, 2, 1].map(score => ({
           score: score,
           count: breakdownMap.get(score) || 0 // ถ้าไม่มี ให้เป็น 0
