@@ -67,7 +67,7 @@ export default async function handler(req) {
         FROM 
           case_activity_logs l
         JOIN 
-          users u ON l.changed_by_user_id = u.id -- 4. JOIN ตาราง users (ตาม column ที่ระบุ) เพื่อเอาชื่อ
+          users u ON l.changed_by_user_id = u.user_id -- (*** แก้ไข JOIN ที่นี่ ***)
         JOIN 
           case_organizations co ON l.case_id = co.case_id -- 5. JOIN ตาราง org เพื่อกรอง
         WHERE 
