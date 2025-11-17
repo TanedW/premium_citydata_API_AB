@@ -57,24 +57,22 @@ export default async function handler(req) {
       }
 
       // 5. (*** NEW SQL QUERY ***) 
-      // Query หลัก - นับกิจกรรมการเปลี่ยนสถานะ (STATUS_CHANGE) โดย JOIN เพื่อเอาชื่อเจ้าหน้าที่
-      // และกรองด้วย organization_id
       const statsResult = await sql`
         SELECT 
-          u.name AS staff_name,      -- 1. เอาชื่อเจ้าหน้าที่
-          l.details AS new_status,   -- 2. เอาสถานะใหม่ (เช่น "เสร็จสิ้น")
-          COUNT(*)::int AS count     -- 3. นับจำนวน
+          CONCAT_WS(' ', u.first_name, u.last_name) AS staff_name, -- (*** แก้ไขที่นี่: รวม first_name และ last_name ***)
+          l.details AS new_status,        -- 2. เอาสถานะใหม่ (เช่น "เสร็จสิ้น")
+          COUNT(*)::int AS count          -- 3. นับจำนวน
         FROM 
           case_activity_logs l
         JOIN 
-          users u ON l.changed_by_user_id = u.user_id -- (*** แก้ไข JOIN ที่นี่ ***)
+          users u ON l.changed_by_user_id = u.user_id 
         JOIN 
-          case_organizations co ON l.case_id = co.case_id -- 5. JOIN ตาราง org เพื่อกรอง
+          case_organizations co ON l.case_id = co.case_id 
         WHERE 
-          co.organization_id = ${organizationId}  -- 6. กรองตามองค์กร
-          AND l.activity_type = 'STATUS_CHANGE'   -- 7. กรองเฉพาะการเปลี่ยนสถานะ
+          co.organization_id = ${organizationId}  
+          AND l.activity_type = 'STATUS_CHANGE'   
         GROUP BY 
-          u.name, l.details
+          staff_name, l.details           -- (*** แก้ไขที่นี่: Group By ตามชื่อที่รวมแล้ว ***)
         ORDER BY
           count DESC;
       `;
