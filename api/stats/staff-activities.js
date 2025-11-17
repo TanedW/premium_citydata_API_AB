@@ -59,9 +59,9 @@ export default async function handler(req) {
       // 5. (*** NEW SQL QUERY ***) 
       const statsResult = await sql`
         SELECT 
-          CONCAT_WS(' ', u.first_name, u.last_name) AS staff_name, -- (*** แก้ไขที่นี่: รวม first_name และ last_name ***)
-          l.details AS new_status,        -- 2. เอาสถานะใหม่ (เช่น "เสร็จสิ้น")
-          COUNT(*)::int AS count          -- 3. นับจำนวน
+          CONCAT_WS(' ', u.first_name, u.last_name) AS staff_name, -- 1. รวม first_name และ last_name
+          l.new_value AS new_status,        -- 2. (*** แก้ไขที่นี่: ใช้ new_value ***)
+          COUNT(*)::int AS count            -- 3. นับจำนวน
         FROM 
           case_activity_logs l
         JOIN 
@@ -72,7 +72,7 @@ export default async function handler(req) {
           co.organization_id = ${organizationId}  
           AND l.activity_type = 'STATUS_CHANGE'   
         GROUP BY 
-          staff_name, l.details           -- (*** แก้ไขที่นี่: Group By ตามชื่อที่รวมแล้ว ***)
+          staff_name, l.new_value           -- (*** แก้ไขที่นี่: Group By new_value ***)
         ORDER BY
           count DESC;
       `;
