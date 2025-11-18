@@ -53,7 +53,7 @@ export default async function handler(req) {
         cases = await sql`
           SELECT ic.*
           FROM issue_cases ic
-          JOIN case_organizations co ON ic.issue_case_id = co.case_id
+          JOIN case_organizations co ON ic.issue_cases_id = co.case_id
           WHERE co.organization_id = ${organization_id}
           ORDER BY ic.created_at DESC
           LIMIT 100;
@@ -70,7 +70,7 @@ export default async function handler(req) {
       // ดึงข้อมูลประกอบทั้งหมดเพื่อแมป
       const [issueTypes, caseOrgs, orgs] = await Promise.all([
         sql`SELECT issue_id, name FROM issue_types;`,
-        // case_id ในตารางนี้คือ issue_case_id (UUID)
+        // case_id ในตารางนี้คือ issue_cases_id (UUID)
         sql`SELECT case_id, organization_id FROM case_organizations;`,
         sql`SELECT organization_id, organization_name FROM organizations;`,
       ]);
@@ -82,9 +82,9 @@ export default async function handler(req) {
 
         // 2. (ที่แก้ไข) หา "ลิงก์" ทั้งหมดที่เชื่อมเคสนี้กับหน่วยงาน
         //    (Code เดิม: .find((co) => co.issue_id === c.issue_id) <-- นี่คือจุดที่ผิด)
-        //    (Code แก้ไข: .filter((co) => co.case_id === c.issue_case_id))
+        //    (Code แก้ไข: .filter((co) => co.case_id === c.issue_cases_id))
         const relatedLinks = caseOrgs.filter(
-          (co) => co.case_id === c.issue_case_id
+          (co) => co.case_id === c.issue_cases_id
         );
 
         // 3. (ที่แก้ไข) แปลง "ลิงก์" ทั้งหมดให้เป็น "ข้อมูลหน่วยงาน" จริง
