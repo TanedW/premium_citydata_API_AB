@@ -67,8 +67,7 @@ export default async function handler(req) {
       } else {
         // --- กรณีที่ 2: ไม่ซ้ำ -> สร้างองค์กรใหม่ ---
         
-        // 5. ดำเนินการ INSERT โดยเพิ่มคอลัมน์ใหม่ทั้งหมดเข้าไป
-        //    ใช้ || null สำหรับฟิลด์ที่เป็น Optional เพื่อจัดการค่าว่าง/undefined
+        // 5. ดำเนินการ INSERT โดยลบคอมเมนต์ใน SQL String ออกทั้งหมด
         const newOrg = await sql`
           INSERT INTO organizations (
             organization_code, 
@@ -94,7 +93,7 @@ export default async function handler(req) {
             ${contact_phone || null},
             ${province || null}
           ) 
-          RETURNING *; // ส่งข้อมูลที่เพิ่งสร้างกลับไป
+          RETURNING *;
         `;
         
         // ส่งข้อมูลองค์กรใหม่กลับไป (Status 201 Created)
