@@ -56,7 +56,7 @@ const options = {
       version: "1.0.0",
     },
   },
-  apis: ["./pages/api/**/*.js"], 
+  apis: ["./api/**/*.js"], 
 };
 
 const spec = swaggerJsdoc(options);
