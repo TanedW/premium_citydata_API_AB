@@ -25,20 +25,26 @@ export default async function handler(req) {
   // --- Logic หลักสำหรับ HTTP POST (เมื่อมีการสร้างองค์กร) ---
   if (req.method === 'POST') {
     try {
-      // [!! แก้ไข !!]
-      // 1. รับข้อมูล organization_code, organization_name 
-      //    และ UUIDs ใหม่ 2 ตัวจาก Frontend
+      // 1. รับข้อมูลทั้งหมดจาก Frontend ตามโครงสร้าง DB
       const { 
         organization_code, 
-        organization_name, 
+        organization_name,
+        admin_code, // ฟิลด์ใหม่ที่ **ต้องระบุ** (NOT NULL)
         org_type_id, 
-        usage_type_id 
+        usage_type_id,
+        url_logo,      // ฟิลด์ใหม่ (Optional)
+        district,      // ฟิลด์ใหม่ (Optional)
+        sub_district,  // ฟิลด์ใหม่ (Optional)
+        contact_phone, // ฟิลด์ใหม่ (Optional)
+        province       // ฟิลด์ใหม่ (Optional)
       } = await req.json();
 
-      // ตรวจสอบว่าได้รับข้อมูล "หลัก" ครบถ้วนหรือไม่
-      // (org_type_id และ usage_type_id อาจเป็น null ได้ ถ้า DB อนุญาต)
-      if (!organization_code || !organization_name) {
-        return new Response(JSON.stringify({ message: 'organization_code and organization_name are required' }), { 
+      // 2. ตรวจสอบว่าได้รับข้อมูล "หลัก" ครบถ้วนหรือไม่
+      //    (organization_code, organization_name, และ admin_code เป็น NOT NULL)
+      if (!organization_code || !organization_name || !admin_code) {
+        return new Response(JSON.stringify({ 
+            message: 'organization_code, organization_name, and admin_code are required' 
+        }), { 
             status: 400, // Bad Request
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
@@ -46,38 +52,49 @@ export default async function handler(req) {
 
       const sql = neon(process.env.DATABASE_URL);
 
-      // 2. ค้นหาในฐานข้อมูลว่ามี organization_code นี้อยู่แล้วหรือไม่
+      // 3. ค้นหาในฐานข้อมูลว่ามี organization_code นี้อยู่แล้วหรือไม่
       const existingOrg = await sql`
         SELECT organization_code FROM organizations WHERE "organization_code" = ${organization_code}
       `;
 
-      // 3. ถ้าเจอข้อมูล (array มีสมาชิกมากกว่า 0) แสดงว่ามีอยู่แล้ว
+      // 4. ถ้าเจอข้อมูล แสดงว่ามีอยู่แล้ว
       if (existingOrg.length > 0) {
         // --- กรณีที่ 1: organization_code ซ้ำ ---
         return new Response(JSON.stringify({ message: 'organization is already' }), { 
-            status: 409, // 409 Conflict เป็น status code ที่เหมาะสมสำหรับข้อมูลซ้ำ
+            status: 409, // 409 Conflict
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       } else {
         // --- กรณีที่ 2: ไม่ซ้ำ -> สร้างองค์กรใหม่ ---
         
-        // [!! แก้ไข !!]
-        // เพิ่ม org_type_id และ usage_type_id เข้าไปในคำสั่ง INSERT
-        // ใช้ || null เพื่อป้องกัน error หาก frontend ส่ง "undefined" หรือ "" (ค่าว่าง) มา
+        // 5. ดำเนินการ INSERT โดยเพิ่มคอลัมน์ใหม่ทั้งหมดเข้าไป
+        //    ใช้ || null สำหรับฟิลด์ที่เป็น Optional เพื่อจัดการค่าว่าง/undefined
         const newOrg = await sql`
           INSERT INTO organizations (
             organization_code, 
             organization_name,
+            admin_code, 
             org_type_id,
-            usage_type_id
+            usage_type_id,
+            url_logo,
+            district,
+            sub_district,
+            contact_phone,
+            province
           ) 
           VALUES (
             ${organization_code}, 
             ${organization_name},
+            ${admin_code}, 
             ${org_type_id || null},
-            ${usage_type_id || null}
+            ${usage_type_id || null},
+            ${url_logo || null},
+            ${district || null},
+            ${sub_district || null},
+            ${contact_phone || null},
+            ${province || null}
           ) 
-          RETURNING *; -- RETURNING * เพื่อส่งข้อมูลที่เพิ่งสร้างกลับไป
+          RETURNING *; // ส่งข้อมูลที่เพิ่งสร้างกลับไป
         `;
         
         // ส่งข้อมูลองค์กรใหม่กลับไป (Status 201 Created)
