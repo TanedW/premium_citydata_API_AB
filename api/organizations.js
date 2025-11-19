@@ -29,14 +29,14 @@ export default async function handler(req) {
       const { 
         organization_code, 
         organization_name,
-        admin_code, // ฟิลด์ใหม่ที่ **ต้องระบุ** (NOT NULL)
+        admin_code, 
         org_type_id, 
         usage_type_id,
-        url_logo,      // ฟิลด์ใหม่ (Optional)
-        district,      // ฟิลด์ใหม่ (Optional)
-        sub_district,  // ฟิลด์ใหม่ (Optional)
-        contact_phone, // ฟิลด์ใหม่ (Optional)
-        province       // ฟิลด์ใหม่ (Optional)
+        url_logo,      
+        district,      
+        sub_district,  
+        contact_phone, 
+        province       
       } = await req.json();
 
       // 2. ตรวจสอบว่าได้รับข้อมูล "หลัก" ครบถ้วนหรือไม่
@@ -45,7 +45,7 @@ export default async function handler(req) {
         return new Response(JSON.stringify({ 
             message: 'organization_code, organization_name, and admin_code are required' 
         }), { 
-            status: 400, // Bad Request
+            status: 400, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
