@@ -2,6 +2,10 @@ Entity-Relationship Diagram (ERD)
 เอกสารนี้อธิบายโครงสร้างและความสัมพันธ์ของตารางต่างๆ ในฐานข้อมูลของโปรเจกต์
 
 ```mermaid
+---
+config:
+  layout: dagre
+---
 erDiagram
     users {
         INTEGER user_id PK
@@ -12,14 +16,26 @@ erDiagram
         TIMESTAMPTZ created_at
         TEXT[] providers
     }
+
+    usage_types{
+        UUID usage_type_id PK
+        TEXT type_value
+        TEXT type_label
+    }
+
     organizations {
         INTEGER organization_id PK
         TEXT organization_code UK
         TEXT organization_name
         TIMESTAMPTZ created_at
         TEXT url_logo
-        INTEGER org_type_id FK
-        INTEGER usage_type_id
+        UUID org_type_id FK
+        UUID usage_type_id FK
+        TEXT admin_code
+        TEXT contact_phone
+        TEXT rovince    
+        TEXT district   
+        TEXT sub_district
     }
     organization_types {
         SERAIL org_type_id PK
@@ -84,8 +100,19 @@ erDiagram
         TEXT comment
         TIMESTAMPTZ created_at
     }
+    case_ratings{
+    INTIGER rating_id PK
+    UUID issue_case_id FK
+    INTIGER user_id FK
+    SMALLINT score
+    TIMESPAMPTZ created_at
+    TEXT comment
+    }
+    users               ||--o{ case_ratings : "gives"
+    issue_cases         ||--o{ case_ratings : "receives"
     users               ||--|{ user_log : "has"
     organization_types  ||--|{ organizations : "classifies"
+    usage_types         ||--|{ organizations : "classifies"
     users               ||--o{ users_organizations : "is_member_of"
     organizations       ||--o{ users_organizations : "has_member"
     issue_cases         }o--|| issue_types : "has type"
