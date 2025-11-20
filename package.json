@@ -12,6 +12,7 @@
   "description": "",
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
+    "express": "^5.1.0",
     "jose": "^6.1.0",
     "pg": "^8.16.3",
     "swagger-jsdoc": "^6.2.8",
