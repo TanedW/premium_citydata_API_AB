@@ -14,14 +14,12 @@
         {
           "key": "Access-Control-Allow-Headers",
           "value": "Content-Type, Authorization"
-        },
-        {
+        }
+      ]
+    }
+  ],
   "rewrites": [
     { "source": "/api/doc", "destination": "/api/doc.js" },
     { "source": "/api/(.*)", "destination": "/api/$1" } 
-  ]
-}
-      ]
-    }
   ]
 }
