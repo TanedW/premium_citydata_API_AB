@@ -1,4 +1,4 @@
-//api/stats/GPS:
+//api/GPS:
 
 export default async function handler(req, res) {
 
