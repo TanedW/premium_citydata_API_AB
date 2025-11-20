@@ -1,4 +1,4 @@
-// /api/cases.js
+// /api/cases/issue_cases.js
 
 export const config = {
   runtime: 'edge',

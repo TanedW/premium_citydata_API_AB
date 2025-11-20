@@ -1,3 +1,6 @@
+// /api/cases/[id]/view.js
+
+
 export const config = {
   runtime: 'nodejs',
 };
