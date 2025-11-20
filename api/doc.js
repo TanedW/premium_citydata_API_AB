@@ -7,8 +7,8 @@ const swaggerDocument = {
   openapi: '3.0.0',
   info: {
     title: 'City Data API',
-    version: '1.2.0', // Update Version
-    description: 'API Documentation for City Data & Incident Management System',
+    version: '1.3.0',
+    description: 'API Documentation (Schemas matched with Filenames)',
   },
   servers: [
     {
@@ -16,7 +16,6 @@ const swaggerDocument = {
       description: 'Production Server',
     },
   ],
-  // --- Authentication ---
   components: {
     securitySchemes: {
       bearerAuth: {
@@ -25,10 +24,10 @@ const swaggerDocument = {
         bearerFormat: 'JWT',
       },
     },
-    // --- SCHEMAS (เพิ่มใหม่ตรงนี้) ---
+    // --- SCHEMAS (ตั้งชื่อตามไฟล์) ---
     schemas: {
-      // 1. User Schema
-      User: {
+      // ไฟล์: users.js
+      Users: {
         type: 'object',
         required: ['email', 'provider', 'first_name', 'last_name'],
         properties: {
@@ -36,17 +35,15 @@ const swaggerDocument = {
           email: { type: 'string', format: 'email', example: 'user@example.com' },
           first_name: { type: 'string', example: 'Somchai' },
           last_name: { type: 'string', example: 'Jaidee' },
-          providers: { type: 'array', items: { type: 'string' }, example: ['google', 'facebook'] },
+          providers: { type: 'array', items: { type: 'string' }, example: ['google'] },
           access_token: { type: 'string', example: 'ya29.a0Aa...' },
-          created_at: { type: 'string', format: 'date-time' },
         },
       },
-      // 2. Organization Schema
-      Organization: {
+      // ไฟล์: organizations.js
+      Organizations: {
         type: 'object',
         required: ['organization_code', 'organization_name', 'admin_code'],
         properties: {
-          id: { type: 'integer', example: 5 },
           organization_code: { type: 'string', example: 'BKK01' },
           organization_name: { type: 'string', example: 'Bangkok City Hall' },
           admin_code: { type: 'string', example: 'ADM-009' },
@@ -59,32 +56,40 @@ const swaggerDocument = {
           contact_phone: { type: 'string', example: '02-123-4567' },
         },
       },
-      // 3. Log Schema
-      UserLog: {
+      // ไฟล์: user_logs.js
+      UserLogs: {
         type: 'object',
         required: ['user_id', 'action_type'],
         properties: {
           user_id: { type: 'integer', example: 101 },
           action_type: { type: 'string', example: 'LOGIN' },
           provider: { type: 'string', example: 'google' },
-          ip_address: { type: 'string', example: '192.168.1.1' },
           user_agent: { type: 'string', example: 'Mozilla/5.0...' },
           status: { type: 'string', example: 'SUCCESS' },
-          details: { type: 'string', example: 'User logged in via Google' },
-          created_at: { type: 'string', format: 'date-time' },
+          details: { type: 'string', example: 'User logged in' },
         },
       },
-      // 4. Rating/Score Schema
-      RatingInput: {
+      // ไฟล์: users_organizations.js (สำหรับการ Join)
+      UsersOrganizations_Input: {
+        type: 'object',
+        required: ['user_id', 'organization_code'],
+        properties: {
+          user_id: { type: 'integer', example: 101 },
+          organization_code: { type: 'string', example: 'BKK01' },
+        },
+      },
+      // ไฟล์: score.js (Input สำหรับส่งคะแนน)
+      Score_Input: {
         type: 'object',
         required: ['issue_case_id', 'score'],
         properties: {
           issue_case_id: { type: 'integer', example: 50 },
           score: { type: 'number', minimum: 1, maximum: 5, example: 4 },
-          comment: { type: 'string', example: 'Great service!' },
+          comment: { type: 'string', example: 'Good job!' },
         },
       },
-      ScoreStats: {
+      // ไฟล์: score.js (Output สำหรับดูสถิติ)
+      Score_Stats: {
         type: 'object',
         properties: {
           average_score: { type: 'number', example: 4.5 },
@@ -92,8 +97,8 @@ const swaggerDocument = {
           latest_score: { type: 'integer', example: 5, nullable: true },
         },
       },
-      // 5. Address (GPS) Schema
-      Address: {
+      // ไฟล์: GPS.js
+      GPS_Address: {
         type: 'object',
         properties: {
           province: { type: 'string', example: 'Pathum Thani' },
@@ -101,12 +106,12 @@ const swaggerDocument = {
           sub_district: { type: 'string', example: 'Khlong Nueng' },
         },
       },
-      // 6. Dropdown Option Schema
-      SelectOption: {
+      // ไฟล์: organization-types.js & usage-types.js (ใช้โครงสร้างเดียวกัน)
+      Common_SelectOption: {
         type: 'object',
         properties: {
           value: { type: 'integer', example: 1 },
-          label: { type: 'string', example: 'Government Agency' },
+          label: { type: 'string', example: 'Option Name' },
         },
       },
     },
@@ -118,56 +123,41 @@ const swaggerDocument = {
     '/api/users': {
       post: {
         summary: 'Login or Register User',
-        tags: ['Authentication'],
+        tags: ['Users.js'],
         requestBody: {
           content: {
-            'application/json': {
-              schema: {
-                $ref: '#/components/schemas/User', // Reuse Schema
-              },
-            },
+            'application/json': { schema: { $ref: '#/components/schemas/Users' } },
           },
         },
         responses: {
-          '200': { description: 'User Updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/User' } } } },
-          '201': { description: 'User Created', content: { 'application/json': { schema: { $ref: '#/components/schemas/User' } } } },
+          '200': { description: 'Updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/Users' } } } },
+          '201': { description: 'Created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Users' } } } },
         },
       },
     },
     '/api/logout': {
       post: {
         summary: 'Logout User',
-        tags: ['Authentication'],
+        tags: ['Logout.js'],
         security: [{ bearerAuth: [] }],
         requestBody: {
           content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: { user_id: { type: 'integer' } },
-              },
-            },
+            'application/json': { schema: { type: 'object', properties: { user_id: { type: 'integer' } } } },
           },
         },
-        responses: {
-          '200': { description: 'Logout processed' },
-        },
+        responses: { '200': { description: 'Logged out' } },
       },
     },
     '/api/user_logs': {
       post: {
-        summary: 'Save User Log',
-        tags: ['Logs'],
+        summary: 'Save Log',
+        tags: ['User_Logs.js'],
         requestBody: {
           content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/UserLog' },
-            },
+            'application/json': { schema: { $ref: '#/components/schemas/UserLogs' } },
           },
         },
-        responses: {
-          '201': { description: 'Log saved' },
-        },
+        responses: { '201': { description: 'Saved' } },
       },
     },
 
@@ -177,70 +167,53 @@ const swaggerDocument = {
     '/api/organizations': {
       post: {
         summary: 'Create Organization',
-        tags: ['Organizations'],
+        tags: ['Organizations.js'],
         requestBody: {
           content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/Organization' },
-            },
+            'application/json': { schema: { $ref: '#/components/schemas/Organizations' } },
           },
         },
         responses: {
-          '201': { description: 'Created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Organization' } } } },
-          '409': { description: 'Organization Code Exists' },
+          '201': { description: 'Created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Organizations' } } } },
         },
       },
     },
     '/api/users_organizations': {
       get: {
-        summary: 'Get User-Org Relationships',
-        tags: ['Organizations'],
+        summary: 'Get Relationships',
+        tags: ['Users_Organizations.js'],
         parameters: [
           { name: 'user_id', in: 'query', schema: { type: 'integer' } },
           { name: 'organization_code', in: 'query', schema: { type: 'string' } },
         ],
-        responses: {
-          '200': { description: 'Success', content: { 'application/json': { schema: { type: 'array', items: { type: 'object' } } } } },
-        },
+        responses: { '200': { description: 'Success' } },
       },
       post: {
         summary: 'Join Organization',
-        tags: ['Organizations'],
+        tags: ['Users_Organizations.js'],
         requestBody: {
           content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['user_id', 'organization_code'],
-                properties: {
-                  user_id: { type: 'integer' },
-                  organization_code: { type: 'string' },
-                },
-              },
-            },
+            'application/json': { schema: { $ref: '#/components/schemas/UsersOrganizations_Input' } },
           },
         },
-        responses: {
-          '201': { description: 'Joined' },
-          '409': { description: 'Already Joined' },
-        },
+        responses: { '201': { description: 'Joined' } },
       },
     },
     '/api/organization-types': {
       get: {
         summary: 'Get Org Types',
-        tags: ['Organizations'],
+        tags: ['Organization-Types.js'],
         responses: {
-          '200': { description: 'Success', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/SelectOption' } } } } },
+          '200': { description: 'Success', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Common_SelectOption' } } } } },
         },
       },
     },
     '/api/usage-types': {
       get: {
         summary: 'Get Usage Types',
-        tags: ['Organizations'],
+        tags: ['Usage-Types.js'],
         responses: {
-          '200': { description: 'Success', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/SelectOption' } } } } },
+          '200': { description: 'Success', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Common_SelectOption' } } } } },
         },
       },
     },
@@ -250,46 +223,42 @@ const swaggerDocument = {
     // ==========================================
     '/api/score': {
       get: {
-        summary: 'Get Case Ratings',
-        tags: ['Scoring'],
+        summary: 'Get Stats',
+        tags: ['Score.js'],
         parameters: [{ name: 'case_id', in: 'query', required: true, schema: { type: 'integer' } }],
         responses: {
-          '200': { description: 'Success', content: { 'application/json': { schema: { $ref: '#/components/schemas/ScoreStats' } } } },
+          '200': { description: 'Success', content: { 'application/json': { schema: { $ref: '#/components/schemas/Score_Stats' } } } },
         },
       },
       post: {
         summary: 'Submit Rating',
-        tags: ['Scoring'],
+        tags: ['Score.js'],
         security: [{ bearerAuth: [] }],
         requestBody: {
           content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/RatingInput' },
-            },
+            'application/json': { schema: { $ref: '#/components/schemas/Score_Input' } },
           },
         },
-        responses: {
-          '201': { description: 'Rating Created' },
-        },
+        responses: { '201': { description: 'Created' } },
       },
     },
-    '/api/stats/GPS': {
+    '/api/GPS': {
       get: {
-        summary: 'Reverse Geocoding',
-        tags: ['Utilities'],
+        summary: 'Reverse Geocode',
+        tags: ['GPS.js'],
         parameters: [
           { name: 'lat', in: 'query', required: true, schema: { type: 'string' } },
           { name: 'lon', in: 'query', required: true, schema: { type: 'string' } },
         ],
         responses: {
-          '200': { description: 'Address Found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Address' } } } },
+          '200': { description: 'Found', content: { 'application/json': { schema: { $ref: '#/components/schemas/GPS_Address' } } } },
         },
       },
     },
   },
 };
 
-// --- 2. HTML Template (บังคับโหลด CDN แก้ Error Vercel) ---
+// --- 2. HTML Template (สำหรับ Vercel) ---
 const HTML_TEMPLATE = `
 <!DOCTYPE html>
 <html lang="en">
