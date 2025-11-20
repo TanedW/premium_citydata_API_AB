@@ -19,7 +19,8 @@
     }
   ],
   "rewrites": [
-    { "source": "/api/doc", "destination": "/api/doc.js" },
-    { "source": "/api/(.*)", "destination": "/api/$1" } 
+  { "source": "/api/doc", "destination": "/api/doc.js" },
+  { "source": "/api/doc/(.*)", "destination": "/api/doc.js" }, 
+  { "source": "/api/(.*)", "destination": "/api/$1" }
   ]
 }
