@@ -68,7 +68,7 @@ export default async function handler(req) {
         FROM 
           users_organizations
         WHERE 
-          organization_code =
+          organization_code = (
             SELECT organization_code 
             FROM organizations
             WHERE organization_id = ${organizationId}
