@@ -398,7 +398,7 @@ const swaggerDocument = {
     },
 
     // --- 6. Utils ---
-    '/api/stats/GPS': {
+    '/api/GPS': {
       get: {
         summary: 'Reverse Geocode',
         tags: ['Utilities'],
