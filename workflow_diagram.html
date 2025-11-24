@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Full API Workflow Diagram</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+    </script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+
+        .diagram-container {
+            margin-bottom: 40px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+        }
+
+        h2 {
+            color: #34495e;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .description {
+            color: #666;
+            font-style: italic;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>My Neon API Project - Workflow Diagrams</h1>
+
+    <div class="diagram-container">
+        <h2>1. Authentication & User Management</h2>
+        <p class="description">Flows for User Login (users.js), Logout (logout.js), and User Logs (user_logs.js)</p>
+        <pre class="mermaid">
+flowchart TD
+    subgraph Login [POST /api/users]
+        L_Start([Client sends Login Data]) --> L_Check{User exists?}
+        L_Check -- Yes --> L_Update[Update Token & Info]
+        L_Check -- No --> L_Create[Create New User]
+        L_Update --> L_Log[Log 'LOGIN' Success]
+        L_Create --> L_Log
+        L_Log --> L_End([Return User Data])
+    end
+
+    subgraph Logout [POST /api/logout]
+        LO_Start([Client requests Logout]) --> LO_Auth{Has Token?}
+        LO_Auth -- Yes --> LO_Invalidate[Set Token = NULL]
+        LO_Auth -- No --> LO_LogFail[Log 'FAILED_NO_TOKEN']
+        LO_Invalidate --> LO_LogSuccess[Log 'LOGOUT' Success]
+        LO_LogSuccess --> LO_End([Return 200 OK])
+        LO_LogFail --> LO_End
+    end
+
+    subgraph LogEvent [POST /api/user_logs]
+        LE_Start([Client sends Log Data]) --> LE_Method{Is POST?}
+        LE_Method -- No --> LE_Err405([Return 405 Method Not Allowed])
+        LE_Method -- Yes --> LE_Extract[Extract IP & Body]
+        LE_Extract --> LE_Val{Has user_id?}
+        LE_Val -- No --> LE_Err400([Return 400 Bad Request])
+        LE_Val -- Yes --> LE_Insert[Insert into user_logs]
+        LE_Insert --> LE_End([Return 201 Created])
+        
+        LE_Insert -.->|Error| LE_Err500([Return 500 Error])
+    end
+        </pre>
+    </div>
+
+    <div class="diagram-container">
+        <h2>2. Organization Management</h2>
+        <p class="description">Creating Organizations (organizations.js) and Joining them (users_organizations.js)</p>
+        <pre class="mermaid">
+flowchart TD
+    subgraph CreateOrg [POST /api/organizations]
+        C_Start([Client sends Org Data]) --> C_Val{Validate Req Fields}
+        C_Val -- Missing --> C_Err400([Return 400 Bad Request])
+        C_Val -- OK --> C_Check{Org Code Exists?}
+        C_Check -- Yes --> C_Err409([Return 409 Conflict])
+        C_Check -- No --> C_Insert[Insert New Organization]
+        C_Insert --> C_End([Return 201 Created])
+    end
+
+    subgraph JoinOrg [POST /api/users_organizations]
+        J_Start([Client requests Join]) --> J_Val{Validate IDs}
+        J_Val -- OK --> J_Check{Already Joined?}
+        J_Check -- Yes --> J_Err409([Return 409 Conflict])
+        J_Check -- No --> J_Insert[Insert User-Org Link]
+        J_Insert --> J_Log[Log 'JOIN ORGANIZATION']
+        J_Log --> J_End([Return 201 Created])
+    end
+
+    subgraph GetOrgInfo [GET /api/users_organizations]
+        G_Start([Client requests Info]) --> G_Type{Query Param?}
+        G_Type -- user_id --> G_ListOrgs[List User's Orgs]
+        G_Type -- org_code --> G_ListUsers[List Org's Users]
+        G_ListOrgs --> G_End([Return List])
+        G_ListUsers --> G_End
+    end
+        </pre>
+    </div>
+
+    <div class="diagram-container">
+        <h2>3. Case Management System</h2>
+        <p class="description">Flows for Issue Cases (api/cases/issue_cases.js) and Case Viewing
+            (api/cases/[id]/view.js)</p>
+        <pre class="mermaid">
+flowchart TD
+    subgraph CreateCase [POST /api/cases/issue_cases]
+        CC_Start([Client sends Case Data]) --> CC_Val{Validate Fields}
+        CC_Val -- Missing --> CC_Err400([Return 400 Bad Request])
+        CC_Val -- OK --> CC_Trans[Start Transaction]
+        CC_Trans --> CC_InsCase[Insert Issue Case]
+        CC_InsCase --> CC_InsMedia[Insert Media Files]
+        CC_InsMedia --> CC_InsLog[Insert Activity Log 'CREATE']
+        CC_InsLog --> CC_InsOrg[Assign to Organizations]
+        CC_InsOrg --> CC_Commit[Commit Transaction]
+        CC_Commit --> CC_End([Return 201 Created])
+        
+        CC_Trans -.->|Error| CC_Rollback[Rollback & Return Error]
+    end
+
+    subgraph GetCases [GET /api/cases/issue_cases]
+        GC_Start([Client requests Cases]) --> GC_Filter{Has org_id?}
+        GC_Filter -- Yes --> GC_QOrg[Query Cases by Org]
+        GC_Filter -- No --> GC_QAll[Query All Cases]
+        GC_QOrg --> GC_Join[Join Types & Orgs]
+        GC_QAll --> GC_Join
+        GC_Join --> GC_End([Return Case List])
+    end
+
+    subgraph ViewCase [PATCH /api/cases/:id/view]
+        VC_Start([Officer Views Case]) --> VC_Val{Validate IDs}
+        VC_Val -- Invalid --> VC_Err400([Return 400])
+        VC_Val -- OK --> VC_Trans[Start Transaction]
+        VC_Trans --> VC_Get[Get Old Status & Officer]
+        VC_Get --> VC_UpdOrg[Update is_viewed = true]
+        VC_UpdOrg --> VC_CheckStat{Status = 'รอรับเรื่อง'?}
+        VC_CheckStat -- Yes --> VC_UpdStat[Update Status = 'กำลังประสานงาน']
+        VC_CheckStat -- No --> VC_LogComment[Log 'COMMENT']
+        VC_UpdStat --> VC_LogStat[Log 'STATUS_CHANGE']
+        VC_LogStat --> VC_Commit[Commit Transaction]
+        VC_LogComment --> VC_Commit
+        VC_Commit --> VC_End([Return 200 OK])
+        
+        VC_Trans -.->|Error| VC_Rollback[Rollback & Return Error]
+    end
+        </pre>
+    </div>
+
+    <div class="diagram-container">
+        <h2>4. Statistics & Dashboard</h2>
+        <p class="description">Analytics Endpoints (api/stats/*.js)</p>
+        <pre class="mermaid">
+flowchart TD
+    subgraph Stats [GET /api/stats/*]
+        ST_Start([Client requests Stats]) --> ST_Auth{Verify Token}
+        ST_Auth -- Invalid --> ST_Err401([Return 401 Unauthorized])
+        ST_Auth -- Valid --> ST_Param{Has org_id?}
+        ST_Param -- No --> ST_Err400([Return 400 Bad Request])
+        ST_Param -- Yes --> ST_Route{Select Endpoint}
+        
+        ST_Route -- /overview --> ST_Q1[Query Case Status Counts]
+        ST_Route -- /count-by-type --> ST_Q2[Query Issue Type Counts]
+        ST_Route -- /overall-rating --> ST_Q3[Query Avg Rating & Breakdown]
+        ST_Route -- /staff-count --> ST_Q4[Query Staff Count]
+        ST_Route -- /staff-activities --> ST_Q5[Query Staff Activity Logs]
+        
+        ST_Q1 --> ST_End([Return JSON Data])
+        ST_Q2 --> ST_End
+        ST_Q3 --> ST_End
+        ST_Q4 --> ST_End
+        ST_Q5 --> ST_End
+    end
+        </pre>
+    </div>
+
+    <div class="diagram-container">
+        <h2>5. Rating & Scoring System</h2>
+        <p class="description">Submitting Ratings (score.js)</p>
+        <pre class="mermaid">
+flowchart TD
+    subgraph SubmitRating [POST /api/score]
+        S_Start([Client submits Rating]) --> S_Auth{Verify Token}
+        S_Auth -- Invalid --> S_Err401([Return 401 Unauthorized])
+        S_Auth -- Valid --> S_Val{Validate Score 1-5}
+        S_Val -- Invalid --> S_Err400([Return 400 Bad Request])
+        S_Val -- Valid --> S_Insert[Insert Rating]
+        S_Insert --> S_Log[Log 'CREATE_RATING']
+        S_Log --> S_End([Return 201 Created])
+    end
+
+    subgraph GetRatings [GET /api/score]
+        GR_Start([Client requests Ratings]) --> GR_Check{Has case_id?}
+        GR_Check -- No --> GR_Err400([Return 400])
+        GR_Check -- Yes --> GR_Query[Calc AVG & Count]
+        GR_Query --> GR_End([Return Stats])
+    end
+        </pre>
+    </div>
+
+    <div class="diagram-container">
+        <h2>6. GPS & Utilities</h2>
+        <p class="description">Reverse Geocoding via Nominatim (GPS.js)</p>
+        <pre class="mermaid">
+sequenceDiagram
+    participant Client
+    participant API as /api/GPS
+    participant OSM as Nominatim (OpenStreetMap)
+
+    Client->>API: GET ?lat=...&lon=...
+    API->>API: Validate lat/lon
+    API->>OSM: HTTP GET (Reverse Geocode)
+    Note right of API: User-Agent: demopremiumcitydata/1.0
+    OSM-->>API: JSON Address Data
+    API->>API: Format Address (Province, District, Sub-district)
+    API-->>Client: JSON Formatted Address
+        </pre>
+    </div>
+
+</body>
+
+</html>
