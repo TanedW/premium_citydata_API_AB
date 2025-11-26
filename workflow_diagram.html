@@ -99,7 +99,7 @@ flowchart TD
 
     subgraph JoinOrg [POST /api/users_organizations]
         J_Start([Client requests Join]) --> J_Val{Validate IDs}
-        J_Val -.->|Invalid ID Error| J_Err404([Return 404 Not Found])
+        J_Val -->|Invalid ID Error| J_Err404([Return 404 Not Found])
         J_Val -- OK --> J_Check{Already Joined?}
         J_Check -- Yes --> J_Err409([Return 409 Conflict])
         J_Check -- No --> J_Insert[Insert User-Org Link]
