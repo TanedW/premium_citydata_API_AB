@@ -52,7 +52,7 @@ export default async function handler(req) {
       const rawLogs = await sql`
         SELECT 
           created_at,
-          changed_by,
+          changed_by_user_id,
           old_value,
           new_value
         FROM case_activity_logs 
