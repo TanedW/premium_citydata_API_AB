@@ -43,7 +43,8 @@ export default async function handler(req) {
 
       if (caseResult.length === 0) return new Response(JSON.stringify({ message: 'Case not found' }), { status: 404, headers: corsHeaders });
 
-      // Query 2: Timeline (แก้ไขให้ใช้ first_name + last_name)
+      // Query 2: Timeline
+      // ดึงชื่อ first_name, last_name มาต่อกัน
       const rawLogs = await sql`
         SELECT 
           cal.created_at, 
@@ -74,16 +75,17 @@ export default async function handler(req) {
         
         if (log.comment) description += ` (${log.comment})`;
 
-        // แสดงชื่อคนทำ (ถ้าหาไม่เจอให้แสดง User ID)
+        // *** จัดรูปแบบชื่อคนทำตามที่คุณต้องการ ***
+        // รูปแบบ: เจ้าหน้าที่ {ID} {ชื่อ นามสกุล}
         const changer = log.changer_name 
-            ? log.changer_name 
-            : `User ID: ${log.changed_by_user_id}`;
+            ? `เจ้าหน้าที่ ${log.changed_by_user_id} ${log.changer_name}` 
+            : `เจ้าหน้าที่ ${log.changed_by_user_id}`;
 
         return {
           status: log.new_value,
           detail: description,
           created_at: log.created_at,
-          changed_by: changer // ส่งชื่อเต็มกลับไป
+          changed_by: changer 
         };
       });
 
@@ -102,10 +104,24 @@ export default async function handler(req) {
 
       const { action, case_id, user_id, ...data } = body;
 
+      // 1. ดึงชื่อเจ้าหน้าที่ก่อน (เหมือน view.js)
+      let officerName = '';
+      if (user_id) {
+        const officerRes = await sql`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
+        if (officerRes.length > 0) {
+            officerName = `${officerRes[0].first_name || ''} ${officerRes[0].last_name || ''}`.trim();
+        }
+      }
+      const officerLabel = `เจ้าหน้าที่ ${user_id} ${officerName}`.trim();
+
+      // --- Action 1: เปลี่ยนประเภท ---
       if (action === 'update_category') {
         const { new_type_id, new_type_name, old_type_name } = data;
+        
         await sql`UPDATE issue_cases SET issue_type_id = ${new_type_id} WHERE issue_cases_id = ${case_id}`;
-        const comment = `เปลี่ยนประเภทเป็น "${new_type_name}"`;
+        
+        // ใส่ชื่อคนทำลงไปใน Comment ด้วย (ถ้าต้องการให้เหมือน view.js)
+        const comment = `${officerLabel} เปลี่ยนประเภทเป็น "${new_type_name}"`;
         
         await sql`
           INSERT INTO case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
@@ -114,10 +130,14 @@ export default async function handler(req) {
         return new Response(JSON.stringify({ message: 'Category updated' }), { status: 200, headers: corsHeaders });
       }
 
+      // --- Action 2: เปลี่ยนสถานะ ---
       if (action === 'update_status') {
         const { new_status, old_status, comment, image_url } = data;
+        
         await sql`UPDATE issue_cases SET status = ${new_status} WHERE issue_cases_id = ${case_id}`;
-        const logComment = comment + (image_url ? ` [แนบรูป: ${image_url}]` : '');
+        
+        // ใส่ชื่อคนทำลงไปใน Comment ด้วย
+        const logComment = `${officerLabel} ปรับสถานะ: ${comment}` + (image_url ? ` [แนบรูป: ${image_url}]` : '');
         
         await sql`
           INSERT INTO case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
