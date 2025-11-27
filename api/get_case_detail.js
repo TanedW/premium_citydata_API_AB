@@ -1,4 +1,3 @@
-// /api/get_case_detail.js
 import { neon } from '@neondatabase/serverless';
 
 export const config = {
@@ -6,12 +5,13 @@ export const config = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', 
+  'Access-Control-Allow-Origin': '*', // หรือใส่ Domain ของคุณ
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 export default async function handler(req) {
+  // Handle CORS Preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -32,11 +32,16 @@ export default async function handler(req) {
         });
       }
 
-      // --- Query 1: ข้อมูลหลัก ---
-      // ใช้ issue_cases_id (ถูกต้องตามตาราง issue_cases)
+      // --- Query 1: ข้อมูลหลัก + ชื่อหน่วยงาน ---
+      // JOIN: issue_cases -> case_organizations -> organizations
       const caseResult = await sql`
-        SELECT * FROM issue_cases 
-        WHERE issue_cases_id = ${id} 
+        SELECT 
+            ic.*,
+            org.organization_name AS agency_name
+        FROM issue_cases ic
+        LEFT JOIN case_organizations co ON ic.issue_cases_id = co.case_id
+        LEFT JOIN organizations org ON co.organization_id = org.organization_id
+        WHERE ic.issue_cases_id = ${id} 
         LIMIT 1
       `;
 
@@ -50,7 +55,6 @@ export default async function handler(req) {
       const caseData = caseResult[0];
 
       // --- Query 2: Timeline ---
-      // *** แก้ไขจุดที่ Error: เปลี่ยนจาก issue_cases_id เป็น case_id ให้ตรงกับตาราง case_activity_logs ***
       const rawLogs = await sql`
         SELECT 
           created_at,
@@ -64,6 +68,7 @@ export default async function handler(req) {
         ORDER BY created_at DESC
       `;
 
+      // จัด Format Timeline
       const formattedTimeline = rawLogs.map(log => {
         let description = log.new_value;
         if (log.old_value && log.old_value !== log.new_value) {
@@ -72,7 +77,6 @@ export default async function handler(req) {
           description = `สถานะเริ่มต้น: ${log.new_value}`;
         }
         
-        // เพิ่ม comment ถ้ามี
         if (log.comment) {
             description += ` (${log.comment})`;
         }
@@ -81,7 +85,7 @@ export default async function handler(req) {
           status: log.new_value,
           detail: description,
           created_at: log.created_at,
-          changed_by: log.changed_by_user_id // แก้ให้ตรงกับชื่อ column ที่ select มา
+          changed_by: log.changed_by_user_id
         };
       });
 
