@@ -32,15 +32,8 @@ export default async function handler(req) {
         });
       }
 
-      const debugCols = await sql`
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'issue_cases';
-      `;
-      console.log("Columns found in DB:", debugCols.map(c => c.column_name));
-      // --- DEBUG END ---
-
-      // Query 1: ข้อมูลหลัก (ใช้ issue_cases_id ตามที่แจ้ง)
+      // --- Query 1: ข้อมูลหลัก ---
+      // ใช้ issue_cases_id (ถูกต้องตามตาราง issue_cases)
       const caseResult = await sql`
         SELECT * FROM issue_cases 
         WHERE issue_cases_id = ${id} 
@@ -56,33 +49,39 @@ export default async function handler(req) {
 
       const caseData = caseResult[0];
 
-      // Query 2: Timeline (ดึง old_value และ new_value)
+      // --- Query 2: Timeline ---
+      // *** แก้ไขจุดที่ Error: เปลี่ยนจาก issue_cases_id เป็น case_id ให้ตรงกับตาราง case_activity_logs ***
       const rawLogs = await sql`
         SELECT 
           created_at,
           changed_by_user_id,
           old_value,
-          new_value
+          new_value,
+          activity_type, 
+          comment
         FROM case_activity_logs 
-        WHERE issue_cases_id = ${id} 
+        WHERE case_id = ${id} 
         ORDER BY created_at DESC
       `;
 
-      // ปรับแต่งข้อมูล Timeline ให้ Frontend แสดงผลได้สวยงาม
       const formattedTimeline = rawLogs.map(log => {
-        // สร้างคำอธิบาย (Detail) จากการเปลี่ยนแปลง
         let description = log.new_value;
         if (log.old_value && log.old_value !== log.new_value) {
           description = `เปลี่ยนสถานะจาก "${log.old_value}" เป็น "${log.new_value}"`;
         } else if (!log.old_value) {
           description = `สถานะเริ่มต้น: ${log.new_value}`;
         }
+        
+        // เพิ่ม comment ถ้ามี
+        if (log.comment) {
+            description += ` (${log.comment})`;
+        }
 
         return {
-          status: log.new_value, // ใช้ค่าใหม่เป็นสถานะปัจจุบันสำหรับแสดง Badge สี
-          detail: description,   // รายละเอียดที่จะโชว์ในบรรทัดล่าง
+          status: log.new_value,
+          detail: description,
           created_at: log.created_at,
-          changed_by: log.changed_by
+          changed_by: log.changed_by_user_id // แก้ให้ตรงกับชื่อ column ที่ select มา
         };
       });
 
