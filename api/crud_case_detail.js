@@ -93,7 +93,7 @@ export default async function handler(req) {
       const { action, case_id, new_type_id, new_type_name, user_id, old_type_name } = await req.json();
 
       // เช็คว่าเป็น Action อะไร (เผื่ออนาคตมี update status ด้วย)
-      if (action === 'update_category') {
+      if (action === 'change_category') {
         
         if (!case_id || !new_type_id) {
           return new Response(JSON.stringify({ message: 'Missing fields' }), { status: 400, headers: corsHeaders });
