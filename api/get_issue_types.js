@@ -23,7 +23,7 @@ export default async function handler(req) {
       // *** ตรวจสอบชื่อตารางและ column ใน DB ของคุณด้วยนะครับ ***
       // สมมติว่าตารางชื่อ issue_types และมี column: id, name
       const types = await sql`
-        SELECT * FROM issue_types ORDER BY issue_type_id ASC
+        SELECT * FROM issue_types ORDER BY issue_id ASC
       `;
 
       return new Response(JSON.stringify(types), {
