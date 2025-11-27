@@ -35,7 +35,7 @@ export default async function handler(req) {
       // Query 1: แก้ไข WHERE เป็น issue_case_id ตาม Database
       const caseResult = await sql`
         SELECT * FROM issue_cases 
-        WHERE issue_case_id = ${id} 
+        WHERE issue_cases_id = ${id} 
         LIMIT 1
       `;
 
@@ -56,7 +56,7 @@ export default async function handler(req) {
           created_at,
           changed_by 
         FROM case_activity_logs 
-        WHERE issue_case_id = ${id} 
+        WHERE issue_cases_id = ${id} 
         ORDER BY created_at DESC
       `;
 
