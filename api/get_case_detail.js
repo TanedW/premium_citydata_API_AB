@@ -32,6 +32,14 @@ export default async function handler(req) {
         });
       }
 
+      const debugCols = await sql`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'issue_cases';
+      `;
+      console.log("Columns found in DB:", debugCols.map(c => c.column_name));
+      // --- DEBUG END ---
+
       // Query 1: ข้อมูลหลัก (ใช้ issue_cases_id ตามที่แจ้ง)
       const caseResult = await sql`
         SELECT * FROM issue_cases 
