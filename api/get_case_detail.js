@@ -6,7 +6,7 @@ export const config = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // แก้เป็น URL จริงของคุณ
+  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', 
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
@@ -32,7 +32,7 @@ export default async function handler(req) {
         });
       }
 
-      // Query 1: แก้ไข WHERE เป็น issue_case_id ตาม Database
+      // Query 1: ข้อมูลหลัก (ใช้ issue_cases_id ตามที่แจ้ง)
       const caseResult = await sql`
         SELECT * FROM issue_cases 
         WHERE issue_cases_id = ${id} 
@@ -48,21 +48,39 @@ export default async function handler(req) {
 
       const caseData = caseResult[0];
 
-      // Query 2: ดึง Timeline (สันนิษฐานว่า Foreign Key ก็ชื่อ issue_case_id เช่นกัน)
-      const logsResult = await sql`
+      // Query 2: Timeline (ดึง old_value และ new_value)
+      const rawLogs = await sql`
         SELECT 
-          status, 
-          action_detail as detail, 
           created_at,
-          changed_by 
+          changed_by,
+          old_value,
+          new_value
         FROM case_activity_logs 
         WHERE issue_cases_id = ${id} 
         ORDER BY created_at DESC
       `;
 
+      // ปรับแต่งข้อมูล Timeline ให้ Frontend แสดงผลได้สวยงาม
+      const formattedTimeline = rawLogs.map(log => {
+        // สร้างคำอธิบาย (Detail) จากการเปลี่ยนแปลง
+        let description = log.new_value;
+        if (log.old_value && log.old_value !== log.new_value) {
+          description = `เปลี่ยนสถานะจาก "${log.old_value}" เป็น "${log.new_value}"`;
+        } else if (!log.old_value) {
+          description = `สถานะเริ่มต้น: ${log.new_value}`;
+        }
+
+        return {
+          status: log.new_value, // ใช้ค่าใหม่เป็นสถานะปัจจุบันสำหรับแสดง Badge สี
+          detail: description,   // รายละเอียดที่จะโชว์ในบรรทัดล่าง
+          created_at: log.created_at,
+          changed_by: log.changed_by
+        };
+      });
+
       const responseData = {
         info: caseData,
-        timeline: logsResult
+        timeline: formattedTimeline
       };
 
       return new Response(JSON.stringify(responseData), {
