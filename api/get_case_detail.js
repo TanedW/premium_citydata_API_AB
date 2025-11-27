@@ -5,13 +5,12 @@ export const config = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // หรือใส่ Domain ของคุณ
+  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 export default async function handler(req) {
-  // Handle CORS Preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -32,15 +31,18 @@ export default async function handler(req) {
         });
       }
 
-      // --- Query 1: ข้อมูลหลัก + ชื่อหน่วยงาน ---
-      // JOIN: issue_cases -> case_organizations -> organizations
+      // --- Query 1: ข้อมูลหลัก + ชื่อหน่วยงาน + ชื่อประเภทปัญหา (NEW) ---
+      // JOIN 1: หาชื่อหน่วยงาน (organizations)
+      // JOIN 2: หาชื่อประเภท (issue_types) ตามรูปที่คุณแนบ
       const caseResult = await sql`
         SELECT 
             ic.*,
-            org.organization_name AS agency_name
+            org.organization_name AS agency_name,
+            it.name AS issue_category_name
         FROM issue_cases ic
         LEFT JOIN case_organizations co ON ic.issue_cases_id = co.case_id
         LEFT JOIN organizations org ON co.organization_id = org.organization_id
+        LEFT JOIN issue_types it ON ic.issue_type_id = it.issue_id 
         WHERE ic.issue_cases_id = ${id} 
         LIMIT 1
       `;
@@ -68,7 +70,6 @@ export default async function handler(req) {
         ORDER BY created_at DESC
       `;
 
-      // จัด Format Timeline
       const formattedTimeline = rawLogs.map(log => {
         let description = log.new_value;
         if (log.old_value && log.old_value !== log.new_value) {
