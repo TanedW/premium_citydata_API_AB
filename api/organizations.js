@@ -11,7 +11,7 @@ import { neon } from '@neondatabase/serverless';
 // ตั้งค่า CORS Headers สำหรับอนุญาตให้ React App ของคุณเรียกใช้ API นี้ได้
 const corsHeaders = {
   // **สำคัญ:** อย่าลืมเปลี่ยนเป็น URL ของ React App ของคุณ
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', 
+  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app',
   'Access-Control-Allow-Methods': 'POST, OPTIONS', // อนุญาตเฉพาะ POST และ OPTIONS
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
@@ -27,27 +27,29 @@ export default async function handler(req) {
   if (req.method === 'POST') {
     try {
       // 1. รับข้อมูลทั้งหมดจาก Frontend ตามโครงสร้าง DB
-      const { 
-        organization_code, 
+      const {
+        organization_code,
         organization_name,
-        admin_code, 
-        org_type_id, 
+        admin_code,
+        org_type_id,
         usage_type_id,
-        url_logo,      
-        district,      
-        sub_district,  
-        contact_phone, 
-        province       
+        url_logo,
+        district,
+        sub_district,
+        contact_phone,
+        province,
+        latitude,  // <-- เพิ่มตรงนี้
+        longitude
       } = await req.json();
 
       // 2. ตรวจสอบว่าได้รับข้อมูล "หลัก" ครบถ้วนหรือไม่
       //    (organization_code, organization_name, และ admin_code เป็น NOT NULL)
       if (!organization_code || !organization_name || !admin_code) {
-        return new Response(JSON.stringify({ 
-            message: 'organization_code, organization_name, and admin_code are required' 
-        }), { 
-            status: 400, 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        return new Response(JSON.stringify({
+          message: 'organization_code, organization_name, and admin_code are required'
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
 
@@ -61,13 +63,13 @@ export default async function handler(req) {
       // 4. ถ้าเจอข้อมูล แสดงว่ามีอยู่แล้ว
       if (existingOrg.length > 0) {
         // --- กรณีที่ 1: organization_code ซ้ำ ---
-        return new Response(JSON.stringify({ message: 'organization is already' }), { 
-            status: 409, // 409 Conflict
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        return new Response(JSON.stringify({ message: 'organization is already' }), {
+          status: 409, // 409 Conflict
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       } else {
         // --- กรณีที่ 2: ไม่ซ้ำ -> สร้างองค์กรใหม่ ---
-        
+
         // 5. ดำเนินการ INSERT โดยลบคอมเมนต์ใน SQL String ออกทั้งหมด
         const newOrg = await sql`
           INSERT INTO organizations (
@@ -80,7 +82,9 @@ export default async function handler(req) {
             district,
             sub_district,
             contact_phone,
-            province
+            province,
+            latitude,  
+        longitude
           ) 
           VALUES (
             ${organization_code}, 
@@ -92,31 +96,33 @@ export default async function handler(req) {
             ${district || null},
             ${sub_district || null},
             ${contact_phone || null},
-            ${province || null}
+            ${province || null},
+            ${latitude || null},
+            ${longitude || null}
           ) 
           RETURNING *;
         `;
-        
+
         // ส่งข้อมูลองค์กรใหม่กลับไป (Status 201 Created)
-        return new Response(JSON.stringify(newOrg[0]), { 
-            status: 201, 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        return new Response(JSON.stringify(newOrg[0]), {
+          status: 201,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
 
     } catch (error) {
       // กรณีเกิดข้อผิดพลาดในการเชื่อมต่อหรือคำสั่ง SQL
       console.error("API Error:", error);
-      return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
   }
 
   // หากมีการเรียกด้วย Method อื่นที่ไม่ใช่ POST หรือ OPTIONS
-  return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
-      status: 405, 
-      headers: corsHeaders 
+  return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), {
+    status: 405,
+    headers: corsHeaders
   });
 }
