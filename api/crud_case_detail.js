@@ -131,27 +131,32 @@ export default async function handler(req) {
 
       // --- Action: เปลี่ยนสถานะ (Target หลักของคุณ) ---
       if (action === 'update_status') {
-        const { new_status, old_status, comment, image_url } = data; 
+        // ❌ ไม่ต้องรับ old_status จาก body แล้ว
+        const { new_status, comment, image_url } = data; 
         
-        // 1. อัปเดตตารางหลัก
+        // ✅ 1. ให้ Backend ดึงสถานะปัจจุบันจริงๆ จาก DB ก่อน
+        const currentCase = await sql`
+            SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id} LIMIT 1
+        `;
+
+        if (currentCase.length === 0) {
+            return new Response(JSON.stringify({ message: 'Case not found' }), { status: 404, headers: corsHeaders });
+        }
+
+        const realOldStatus = currentCase[0].status; // นี่คือสถานะเดิมที่แท้จริง
+
+        // 2. อัปเดตตารางหลัก
         await sql`UPDATE issue_cases SET status = ${new_status}, updated_at = NOW() WHERE issue_cases_id = ${case_id}`;
         
-        // 2. สร้างข้อความ Log
-        // Ex: "เจ้าหน้าที่ 26 Taned Wongpoo ปรับสถานะเป็น เสร็จสิ้น : เรียบร้อยครับ [แนบรูปประกอบ]"
+        // 3. สร้างข้อความ Log
         let fullLogComment = `${officerLabel} ปรับสถานะเป็น "${new_status}"`;
+        if (comment && comment.trim() !== "") fullLogComment += ` : ${comment}`;
+        if (image_url) fullLogComment += ` [แนบรูปประกอบ]`;
         
-        if (comment && comment.trim() !== "") {
-            fullLogComment += ` : ${comment}`;
-        }
-        
-        if (image_url) {
-            fullLogComment += ` [แนบรูปประกอบ]`;
-        }
-        
-        // 3. บันทึก Log
+        // 4. บันทึก Log (ใช้ realOldStatus ที่ดึงมาเอง)
         await sql`
           INSERT INTO case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
-          VALUES (${case_id}, 'STATUS_CHANGE', ${old_status}, ${new_status}, ${user_id || null}, ${fullLogComment})
+          VALUES (${case_id}, 'STATUS_CHANGE', ${realOldStatus}, ${new_status}, ${user_id || null}, ${fullLogComment})
         `;
 
         return new Response(JSON.stringify({ message: 'Status updated successfully' }), { 
