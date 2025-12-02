@@ -1,0 +1,260 @@
+
+File: api/GPS.js
+Endpoint: GET /api/GPS?lat=13.7563&lon=100.5018
+Description: Reverse Geocoding to get address from coordinates.
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/crud_case_detail.js
+Endpoint: GET /api/crud_case_detail?id=123
+Description: Get case details and timeline.
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/crud_case_detail.js
+Endpoint: POST /api/crud_case_detail
+Description: Update case category.
+Payload:
+{
+  "action": "update_category",
+  "case_id": "uuid-string",
+  "user_id": 101,
+  "new_type_id": 2,
+  "new_type_name": "Electricity",
+  "old_type_name": "Roads"
+}
+----------------------------------------
+
+File: api/crud_case_detail.js
+Endpoint: POST /api/crud_case_detail
+Description: Update case status.
+Payload:
+{
+  "action": "update_status",
+  "case_id": "uuid-string",
+  "user_id": 101,
+  "new_status": "Completed",
+  "old_status": "In Progress",
+  "comment": "Fixed the issue",
+  "image_url": "http://example.com/image.jpg"
+}
+----------------------------------------
+
+File: api/get_issue_types.js
+Endpoint: GET /api/get_issue_types
+Description: Get all issue types.
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/logout.js
+Endpoint: POST /api/logout
+Description: Logout user.
+Headers:
+Authorization: Bearer <access_token>
+Payload:
+{
+  "user_id": 101
+}
+----------------------------------------
+
+File: api/organization-types.js
+Endpoint: GET /api/organization-types
+Description: Get organization types.
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/organizations.js
+Endpoint: POST /api/organizations
+Description: Create a new organization.
+Payload:
+{
+  "organization_code": "BKK01",
+  "organization_name": "Bangkok City Hall",
+  "admin_code": "ADM-009",
+  "org_type_id": 1,
+  "usage_type_id": 1,
+  "url_logo": "http://example.com/logo.png",
+  "province": "Bangkok",
+  "district": "Phra Nakhon",
+  "sub_district": "Sao Chingcha",
+  "contact_phone": "02-123-4567",
+  "latitude": 13.7563,
+  "longitude": 100.5018
+}
+----------------------------------------
+
+File: api/organizations.js
+Endpoint: PUT /api/organizations
+Description: Update an organization.
+Payload:
+{
+  "organization_id": 5,
+  "organization_name": "Bangkok City Hall Updated",
+  "contact_phone": "02-987-6543"
+}
+----------------------------------------
+
+File: api/score.js
+Endpoint: POST /api/score
+Description: Submit a rating for a case.
+Headers:
+Authorization: Bearer <access_token>
+Payload:
+{
+  "issue_case_id": 123,
+  "score": 5,
+  "comment": "Great service!"
+}
+----------------------------------------
+
+File: api/score.js
+Endpoint: GET /api/score?case_id=123
+Description: Get rating for a case.
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/usage-types.js
+Endpoint: GET /api/usage-types
+Description: Get usage types.
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/user_logs.js
+Endpoint: POST /api/user_logs
+Description: Save a user log.
+Payload:
+{
+  "user_id": 101,
+  "action_type": "CLICK_BUTTON",
+  "provider": "google",
+  "user_agent": "Mozilla/5.0...",
+  "status": "SUCCESS",
+  "details": "User clicked submit button"
+}
+----------------------------------------
+
+File: api/users.js
+Endpoint: POST /api/users
+Description: Login or Register a user.
+Payload:
+{
+  "email": "user@example.com",
+  "provider": "google",
+  "first_name": "Somchai",
+  "last_name": "Jaidee",
+  "access_token": "oauth_access_token"
+}
+----------------------------------------
+
+File: api/users_organizations.js
+Endpoint: GET /api/users_organizations?user_id=101
+Description: Get organizations for a user.
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/users_organizations.js
+Endpoint: GET /api/users_organizations?organization_code=BKK01
+Description: Get users in an organization.
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/users_organizations.js
+Endpoint: POST /api/users_organizations
+Description: Join an organization.
+Payload:
+{
+  "user_id": 101,
+  "organization_code": "BKK01"
+}
+----------------------------------------
+
+File: api/cases/issue_cases.js
+Endpoint: GET /api/cases/issue_cases
+Description: Get all cases (optional: ?organization_id=1).
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/cases/issue_cases.js
+Endpoint: POST /api/cases/issue_cases
+Description: Create a new issue case.
+Payload:
+{
+  "title": "Found a pothole",
+  "description": "Deep pothole on the main road",
+  "cover_image_url": "http://example.com/pothole.jpg",
+  "issue_type_id": 1,
+  "latitude": 13.7563,
+  "longitude": 100.5018,
+  "tags": ["road", "danger"],
+  "user_id": 101,
+  "organization_ids": [1, 2],
+  "media_files": [
+    { "media_type": "image", "url": "http://example.com/pothole1.jpg" },
+    { "media_type": "image", "url": "http://example.com/pothole2.jpg" }
+  ]
+}
+----------------------------------------
+
+File: api/cases/[id]/view.js
+Endpoint: PATCH /api/cases/uuid-string/view
+Description: Mark a case as viewed by an officer.
+Payload:
+{
+  "organization_id": 1,
+  "user_id": 101
+}
+----------------------------------------
+
+File: api/stats/count-by-type.js
+Endpoint: GET /api/stats/count-by-type?organization_id=1
+Description: Get case count by type.
+Headers:
+Authorization: Bearer <access_token>
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/stats/overall-rating.js
+Endpoint: GET /api/stats/overall-rating?organization_id=1
+Description: Get overall rating statistics.
+Headers:
+Authorization: Bearer <access_token>
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/stats/overview.js
+Endpoint: GET /api/stats/overview?organization_id=1
+Description: Get overview status counts.
+Headers:
+Authorization: Bearer <access_token>
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/stats/staff-activities.js
+Endpoint: GET /api/stats/staff-activities?organization_id=1
+Description: Get staff activity leaderboard.
+Headers:
+Authorization: Bearer <access_token>
+Payload:
+(No Body)
+----------------------------------------
+
+File: api/stats/staff-count.js
+Endpoint: GET /api/stats/staff-count?organization_id=1
+Description: Get staff count.
+Headers:
+Authorization: Bearer <access_token>
+Payload:
+(No Body)
+----------------------------------------

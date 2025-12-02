@@ -1,352 +1,225 @@
-// /api/cases/issue_cases.js
+// /api/crud_case_detail.js (หรือชื่อไฟล์ที่คุณใช้งานอยู่)
+
+import { neon } from '@neondatabase/serverless';
 
 export const config = {
   runtime: 'edge',
 };
 
-import { neon } from '@neondatabase/serverless';
-
-// ---------------- CORS ----------------
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // URL ของ Frontend
-  // !!! เพิ่ม PATCH เข้าไปในรายการ Methods !!!
-  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+  'Access-Control-Allow-Origin': '*', // แนะนำให้ระบุ Domain จริงเมื่อขึ้น Production
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// ---------------- Helper ----------------
-function generateCaseCode() {
-  const year = new Date().getFullYear();
-  const randomDigits = Math.floor(Math.random() * 1000)
-    .toString()
-    .padStart(3, '0');
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  let randomLetters = '';
-  for (let i = 0; i < 3; i++) {
-    randomLetters += characters.charAt(
-      Math.floor(Math.random() * characters.length)
-    );
-  }
-  return `${year}-${randomDigits}${randomLetters}`;
-}
-
-// ---------------- Handler ----------------
 export default async function handler(req) {
-  // --- Preflight (CORS) ---
+  // 1. Handle CORS Preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   const sql = neon(process.env.DATABASE_URL);
 
-  // ============================================================
-  // 1️⃣ GET — ดึงข้อมูลเคสทั้งหมด (รวมประเภทและหน่วยงาน)
-  // ============================================================
-  if (req.method === 'GET') {
-    try {
-      const { organization_id } = Object.fromEntries(
-        new URL(req.url).searchParams
-      );
+  try {
+    // ==========================================
+    // 1️⃣ GET: ดึงข้อมูลรายละเอียดเคส + Timeline
+    // ==========================================
+    if (req.method === 'GET') {
+      const { searchParams } = new URL(req.url);
+      const id = searchParams.get('id');
 
-      let cases;
-      if (organization_id) {
-        // ดึงเฉพาะเคสที่เกี่ยวกับหน่วยงานนี้
-        cases = await sql`
-          SELECT ic.*
-          FROM issue_cases ic
-          JOIN case_organizations co ON ic.issue_cases_id = co.case_id
-          WHERE co.organization_id = ${organization_id}
-          ORDER BY ic.created_at DESC
-          LIMIT 100;
-        `;
-      } else {
-        // ดึงทั้งหมด
-        cases = await sql`
-          SELECT * FROM issue_cases
-          ORDER BY created_at DESC
-          LIMIT 100;
-        `;
+      if (!id) {
+        return new Response(JSON.stringify({ message: 'Missing id param' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
       }
 
-      // ดึงข้อมูลประกอบทั้งหมดเพื่อแมป
-      const [issueTypes, caseOrgs, orgs] = await Promise.all([
-        sql`SELECT issue_id, name FROM issue_types;`,
-        sql`SELECT case_id, organization_id FROM case_organizations;`,
-        sql`SELECT organization_id, organization_name FROM organizations;`,
-      ]);
+      // --- Query 1: ข้อมูลหลักของเคส ---
+      const caseResult = await sql`
+        SELECT 
+            ic.*,
+            org.organization_name AS agency_name,
+            it.name AS issue_category_name
+        FROM issue_cases ic
+        LEFT JOIN case_organizations co ON ic.issue_cases_id = co.case_id
+        LEFT JOIN organizations org ON co.organization_id = org.organization_id
+        LEFT JOIN issue_types it ON ic.issue_type_id = it.issue_id 
+        WHERE ic.issue_cases_id = ${id} 
+        LIMIT 1
+      `;
 
-      // รวมข้อมูล
-      const merged = cases.map((c) => {
-        const type = issueTypes.find((t) => t.issue_id === c.issue_type_id);
-
-        const relatedLinks = caseOrgs.filter(
-          (co) => co.case_id === c.issue_cases_id
-        );
-
-        const relatedOrgs = relatedLinks.map((link) => {
-          const orgData = orgs.find(
-            (o) => o.organization_id === link.organization_id
-          );
-
-          if (orgData) {
-            return {
-              orgid: orgData.organization_id,
-              responsible_unit: orgData.organization_name,
-            };
-          }
-          return {
-            orgid: link.organization_id,
-            responsible_unit: 'ไม่พบข้อมูลหน่วยงาน',
-          };
+      if (caseResult.length === 0) {
+        return new Response(JSON.stringify({ message: 'Case not found' }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
+      }
+
+      // --- Query 2: Timeline (ดึงชื่อ User มาด้วย) ---
+      const rawLogs = await sql`
+        SELECT 
+          cal.created_at, 
+          cal.changed_by_user_id, 
+          cal.old_value, 
+          cal.new_value, 
+          cal.activity_type, 
+          cal.comment,
+          u.first_name,
+          u.last_name
+        FROM case_activity_logs cal
+        LEFT JOIN users u ON cal.changed_by_user_id = u.user_id
+        WHERE cal.case_id = ${id} 
+        ORDER BY cal.created_at DESC
+      `;
+
+      // --- Formatter: จัดรูปแบบ Timeline ---
+      const formattedTimeline = rawLogs.map(log => {
+        // 1. สร้าง Label ชื่อเจ้าหน้าที่: "เจ้าหน้าที่ 26 Taned Wongpoo"
+        let changerLabel = `เจ้าหน้าที่ ${log.changed_by_user_id}`;
+        if (log.first_name || log.last_name) {
+             const fullName = `${log.first_name || ''} ${log.last_name || ''}`.trim();
+             changerLabel = `เจ้าหน้าที่ ${log.changed_by_user_id} ${fullName}`;
+        }
+        
+        // ถ้าเป็น System หรือไม่มี user_id
+        if (!log.changed_by_user_id) {
+            changerLabel = 'ระบบ';
+        }
+
+        let description = "";
+
+        // 2. Logic การแสดงข้อความ (Detail)
+        // ถ้ามี Comment (ซึ่งเราบันทึกไว้เต็มรูปแบบแล้ว) ให้ใช้ Comment เลย
+        if (log.comment && log.comment.trim() !== "") {
+            description = log.comment;
+        } else {
+            // Fallback กรณีข้อมูลเก่าที่ไม่มี Comment สมบูรณ์
+            if (log.activity_type === 'TYPE_CHANGE') {
+                description = `เปลี่ยนประเภทจาก "${log.old_value}" เป็น "${log.new_value}"`;
+            } else if (log.activity_type === 'STATUS_CHANGE') { 
+                description = `เปลี่ยนสถานะจาก "${log.old_value}" เป็น "${log.new_value}"`;
+            } else if (log.old_value && log.old_value !== log.new_value) {
+                description = `เปลี่ยนจาก "${log.old_value}" เป็น "${log.new_value}"`;
+            } else if (!log.old_value) {
+                 description = `สถานะเริ่มต้น: ${log.new_value}`;
+            } else {
+                description = `สถานะ: ${log.new_value}`;
+            }
+        }
 
         return {
-          ...c,
-          issue_type_name: type ? type.name : 'ไม่ทราบประเภท',
-          organizations: relatedOrgs,
+          status: log.new_value,
+          detail: description, // ข้อความที่จะโชว์
+          created_at: log.created_at,
+          changed_by: changerLabel // ชื่อคนทำ (เผื่อ frontend อยากเอาไปแยกแสดง)
         };
       });
 
-      return new Response(JSON.stringify(merged), {
+      return new Response(JSON.stringify({
+        info: caseResult[0],
+        timeline: formattedTimeline
+      }), {
         status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
-    } catch (error) {
-      console.error('API Error (GET):', error);
-      return new Response(
-        JSON.stringify({
-          message: 'Database query failed',
-          error: error.message,
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
     }
-  }
 
-  // ============================================================
-  // 2️⃣ POST — เพิ่มเคสใหม่
-  // ============================================================
-  if (req.method === 'POST') {
-    let body; 
-    
-    try {
-      body = await req.json();
-      const {
-        title,
-        description,
-        cover_image_url,
-        issue_type_id,
-        latitude,
-        longitude,
-        tags,
-        media_files,
-        user_id,
-        organization_ids
-      } = body;
-      
-      if (!title || !issue_type_id || !latitude || !longitude) {
-        return new Response(JSON.stringify({ message: 'Missing required fields: title, issue_type_id, latitude, and longitude are required.' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+    // ==========================================
+    // 2️⃣ POST: อัปเดตข้อมูล (Action Based)
+    // ==========================================
+    if (req.method === 'POST') {
+      let body;
+      try { 
+        body = await req.json(); 
+      } catch (e) { 
+        return new Response(JSON.stringify({ message: 'Invalid JSON' }), { status: 400, headers: corsHeaders }); 
       }
-      
-      let validUserId = null; 
-      if (user_id !== null && user_id !== undefined) {
-        if (typeof user_id !== 'number' || !Number.isInteger(user_id)) {
-           return new Response(JSON.stringify({ message: 'Invalid user_id: If provided, must be an integer.' }), {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
+
+      const { action, case_id, user_id, ...data } = body;
+
+      // --- 1. เตรียมข้อมูลผู้ใช้งาน (Officer Label) ---
+      // เพื่อนำไปแปะหน้าข้อความ Log: "เจ้าหน้าที่ 26 Taned Wongpoo"
+      let officerLabel = `เจ้าหน้าที่ ${user_id}`;
+      if (user_id) {
+        const officerRes = await sql`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
+        if (officerRes.length > 0) {
+            const fullName = `${officerRes[0].first_name || ''} ${officerRes[0].last_name || ''}`.trim();
+            officerLabel = `เจ้าหน้าที่ ${user_id} ${fullName}`;
         }
-        validUserId = user_id;
       }
-      
-      const newCaseId = crypto.randomUUID(); 
-      const caseCode = generateCaseCode();
-      const defaultStatus = 'รอรับเรื่อง'; 
+
+      // --- Action 1: เปลี่ยนประเภทปัญหา (update_category) ---
+      if (action === 'update_category') {
+        const { new_type_id, new_type_name, old_type_name } = data;
         
-      const queries = [];
+        // อัปเดตตารางหลัก
+        await sql`UPDATE issue_cases SET issue_type_id = ${new_type_id} WHERE issue_cases_id = ${case_id}`;
+        
+        // สร้างข้อความ Log
+        const fullComment = `${officerLabel} เปลี่ยนประเภทปัญหาเป็น "${new_type_name}"`;
+        
+        // บันทึก Log
+        await sql`
+          INSERT INTO case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
+          VALUES (${case_id}, 'TYPE_CHANGE', ${old_type_name}, ${new_type_name}, ${user_id || null}, ${fullComment})
+        `;
+        
+        return new Response(JSON.stringify({ message: 'Category updated successfully' }), { 
+            status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
+      }
 
-      // Step 1: Create Case
-      queries.push(sql`
-        INSERT INTO issue_cases (
-          issue_cases_id, 
-          case_code, 
-          title, 
-          description, 
-          cover_image_url, 
-          issue_type_id, 
-          latitude, 
-          longitude, 
-          tags,
-          status
-        ) VALUES (
-          ${newCaseId}, 
-          ${caseCode}, 
-          ${title}, 
-          ${description}, 
-          ${cover_image_url}, 
-          ${issue_type_id}, 
-          ${latitude}, 
-          ${longitude}, 
-          ${tags},
-          ${defaultStatus}
-        )
-        RETURNING *;
-      `);
-
-      // Step 2: Media Files
-      if (media_files && media_files.length > 0) {
-        for (const file of media_files) {
-          queries.push(sql`
-            INSERT INTO case_media (case_id, media_type, url)
-            VALUES (${newCaseId}, ${file.media_type}, ${file.url})
-          `);
+      // --- Action 2: เปลี่ยนสถานะ (update_status) ---
+      if (action === 'update_status') {
+        const { new_status, old_status, comment, image_url } = data; 
+        
+        // อัปเดตตารางหลัก
+        await sql`UPDATE issue_cases SET status = ${new_status}, updated_at = NOW() WHERE issue_cases_id = ${case_id}`;
+        
+        // สร้างข้อความ Log
+        // รูปแบบ: "เจ้าหน้าที่ 26 Taned Wongpoo ปรับสถานะเป็น เสร็จสิ้น : รายละเอียด... [แนบรูปประกอบ]"
+        let fullLogComment = `${officerLabel} ปรับสถานะเป็น "${new_status}"`;
+        
+        if (comment && comment.trim() !== "") {
+            fullLogComment += ` : ${comment}`;
         }
-      }
-
-      // Step 3: Activity Log (CREATE)
-      queries.push(sql`
-        INSERT INTO case_activity_logs 
-          (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
-        VALUES
-          (${newCaseId}, ${validUserId}, 'CREATE', NULL, ${defaultStatus}, 'สร้างเคสใหม่');
-      `);
-
-      // Step 4: Organization Links
-      if (organization_ids && organization_ids.length > 0) {
-        for (const orgId of organization_ids) {
-          if (typeof orgId === 'number' && Number.isInteger(orgId)) {
-            queries.push(sql`
-              INSERT INTO case_organizations (case_id, organization_id, is_viewed)
-              VALUES (${newCaseId}, ${orgId}, false)
-            `);
-          }
+        
+        if (image_url) {
+            fullLogComment += ` [แนบรูปประกอบ]`;
+            // ถ้าต้องการบันทึกลงตาราง case_media ด้วย ให้เพิ่ม Query ตรงนี้
+            // await sql`INSERT INTO case_media ...`
         }
-      }
-      
-      const results = await sql.transaction(queries);
-      const newCase = results[0]; 
-      
-      return new Response(JSON.stringify(newCase), { 
-          status: 201, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+        
+        // บันทึก Log
+        await sql`
+          INSERT INTO case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
+          VALUES (${case_id}, 'STATUS_CHANGE', ${old_status}, ${new_status}, ${user_id || null}, ${fullLogComment})
+        `;
 
-    } catch (error) {
-      console.error("API Error (POST):", error);
-      if (error.message && error.message.includes('unique constraint') && error.message.includes('issue_cases_case_code_key')) {
-        return new Response(JSON.stringify({ 
-          message: 'Case code collision. Please try submitting again.',
-          error: error.message 
-        }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ message: 'Status updated successfully' }), { 
+            status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
       }
-      if (error.message && error.message.includes('violates foreign key constraint')) {
-         return new Response(JSON.stringify({ 
-          message: 'Invalid data. For example, issue_type_id, user_id, or organization_id does not exist.',
-          error: error.message 
-        }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-      
-      return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
-          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+
+      // กรณีส่ง Action มาไม่ตรง
+      return new Response(JSON.stringify({ message: 'Unknown action provided' }), { 
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       });
     }
-  }
 
-  // ============================================================
-  // 3️⃣ PATCH — อัปเดตสถานะ (!!! เพิ่มใหม่ !!!)
-  // ============================================================
-  if (req.method === 'PATCH') {
-    try {
-      const body = await req.json();
-      const {
-        case_id,        // ID ของเคส (UUID)
-        user_id,        // ID ของ User ที่ทำรายการ (Integer)
-        new_status,     // สถานะใหม่ เช่น 'ดำเนินการ', 'เสร็จสิ้น'
-        comment,        // รายละเอียดการดำเนินการ
-        media_url,      // (Optional) URL รูปภาพผลการทำงาน
-        media_type      // (Optional) เช่น 'image'
-      } = body;
+    // --- Method Not Allowed ---
+    return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
+        status: 405, headers: corsHeaders 
+    });
 
-      // 3.1 ตรวจสอบข้อมูลจำเป็น
-      if (!case_id || !new_status || !user_id) {
-        return new Response(JSON.stringify({ 
-          message: 'Missing required fields: case_id, user_id, and new_status are required.' 
-        }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      // 3.2 ดึงสถานะเดิมก่อน (เพื่อเอามาลง Log)
-      const currentCase = await sql`
-        SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id} LIMIT 1
-      `;
-
-      if (currentCase.length === 0) {
-        return new Response(JSON.stringify({ message: 'Case not found' }), {
-          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      const oldStatus = currentCase[0].status;
-      const queries = [];
-
-      // Step 1: Query อัปเดตสถานะในตารางหลัก
-      queries.push(sql`
-        UPDATE issue_cases 
-        SET status = ${new_status}, updated_at = NOW()
-        WHERE issue_cases_id = ${case_id}
-      `);
-
-      // Step 2: Query บันทึก Log การเปลี่ยนแปลง (activity_type = 'STATUS_CHANGE')
-      queries.push(sql`
-        INSERT INTO case_activity_logs 
-          (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
-        VALUES
-          (${case_id}, ${user_id}, 'STATUS_CHANGE', ${oldStatus}, ${new_status}, ${comment || ''})
-      `);
-
-      // Step 3: (ถ้ามี) บันทึกรูปภาพประกอบการทำงาน
-      if (media_url) {
-        queries.push(sql`
-          INSERT INTO case_media (case_id, media_type, url)
-          VALUES (${case_id}, ${media_type || 'image'}, ${media_url})
-        `);
-      }
-
-      // 3.3 รัน Transaction
-      await sql.transaction(queries);
-
-      return new Response(JSON.stringify({ 
-        message: 'Status updated successfully',
-        prev_status: oldStatus,
-        new_status: new_status
-      }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-
-    } catch (error) {
-      console.error("API Error (PATCH):", error);
-      return new Response(JSON.stringify({ 
-        message: 'Failed to update status',
+  } catch (error) {
+    console.error("API Error:", error);
+    return new Response(JSON.stringify({ 
+        message: 'Internal Server Error', 
         error: error.message 
-      }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
+    }), { 
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
   }
-
-  // --- 4. Handle any other HTTP methods ---
-  return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
-      status: 405, 
-      headers: corsHeaders 
-  });
 }
