@@ -2,14 +2,13 @@
 
 import { neon } from '@neondatabase/serverless';
 
-// ✅ คงไว้ตามที่คุณต้องการ
 export const config = {
   runtime: 'edge',
 };
 
 // ---------------- CORS ----------------
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // แนะนำให้ใส่ domain จริงเมื่อขึ้น Production
+  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
@@ -24,7 +23,7 @@ export default async function handler(req) {
 
   try {
     // ==========================================
-    // 1️⃣ GET: ดึงข้อมูล (เหมือนเดิม)
+    // 1️⃣ GET: ดึงข้อมูล + คำนวณ Rating
     // ==========================================
     if (req.method === 'GET') {
       const { searchParams } = new URL(req.url);
@@ -37,11 +36,17 @@ export default async function handler(req) {
         });
       }
 
+      // ✅ แก้ไข: เพิ่ม Subquery คำนวณ rating จากตาราง case_ratings
       const caseResult = await sql`
         SELECT 
             ic.*,
             org.organization_name AS agency_name,
-            it.name AS issue_category_name
+            it.name AS issue_category_name,
+            (
+                SELECT COALESCE(ROUND(AVG(score)), 0)::int 
+                FROM case_ratings 
+                WHERE case_id = ic.issue_cases_id
+            ) AS rating
         FROM issue_cases ic
         LEFT JOIN case_organizations co ON ic.issue_cases_id = co.case_id
         LEFT JOIN organizations org ON co.organization_id = org.organization_id
@@ -104,13 +109,12 @@ export default async function handler(req) {
     if (req.method === 'POST') {
       let body;
       
-      // ✅ เทคนิคแก้ปัญหา Edge: อ่านเป็น Text ก่อน ค่อย Parse
       try {
-        const rawText = await req.text(); // อ่าน Body ดิบๆ
+        const rawText = await req.text();
         if (!rawText) {
              throw new Error("Empty request body");
         }
-        body = JSON.parse(rawText); // แปลงเป็น JSON เอง
+        body = JSON.parse(rawText);
       } catch (e) {
         console.error("JSON Parse Error:", e);
         return new Response(JSON.stringify({ 
@@ -120,8 +124,6 @@ export default async function handler(req) {
       }
 
       const { action, case_id, user_id, ...data } = body;
-
-      // Debug ดูค่าที่ได้รับ
       console.log("Edge Received:", { action, case_id });
 
       let officerLabel = `เจ้าหน้าที่ ${user_id}`;
