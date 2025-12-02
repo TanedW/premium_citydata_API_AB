@@ -1,4 +1,3 @@
-// /api/crud_case_detail.js
 import { neon } from '@neondatabase/serverless';
 
 export const config = {
@@ -22,7 +21,7 @@ export default async function handler(req) {
 
   try {
     // ==========================================
-    // 1️⃣ GET: ดึงข้อมูล
+    // 1️⃣ GET: ดึงข้อมูล (รวมถึง Ratings)
     // ==========================================
     if (req.method === 'GET') {
       const { searchParams } = new URL(req.url);
@@ -35,7 +34,7 @@ export default async function handler(req) {
         });
       }
 
-      // --- Step 1: ดึงข้อมูล Case ---
+      // --- 1.1 ดึงข้อมูล Case ---
       const caseResult = await sql`
         SELECT 
             ic.*,
@@ -56,7 +55,7 @@ export default async function handler(req) {
         });
       }
 
-      // --- Step 2: ดึง Timeline (Logs) ---
+      // --- 1.2 ดึง Timeline (Logs) ---
       const rawLogs = await sql`
         SELECT 
           cal.created_at, 
@@ -73,7 +72,7 @@ export default async function handler(req) {
         ORDER BY cal.created_at DESC
       `;
 
-      // --- Step 3: ดึง Ratings (เพิ่มใหม่ตรงนี้) ---
+      // --- 1.3 ดึง Ratings (เพิ่มใหม่) ---
       // ดึง score เพื่อส่งไปให้ Frontend คำนวณค่าเฉลี่ย
       const ratingsResult = await sql`
         SELECT score, comment, created_at 
@@ -81,7 +80,7 @@ export default async function handler(req) {
         WHERE case_id = ${id}
       `;
 
-      // Format Timeline
+      // --- 1.4 Format Timeline ---
       const formattedTimeline = rawLogs.map(log => {
         let changerLabel = `เจ้าหน้าที่ ${log.changed_by_user_id || 'ระบบ'}`;
         if (log.first_name || log.last_name) {
@@ -98,11 +97,11 @@ export default async function handler(req) {
         };
       });
 
-      // ส่ง response กลับไปรวมทั้ง info, timeline และ ratings
+      // --- 1.5 Return Response ---
       return new Response(JSON.stringify({
         info: caseResult[0],
         timeline: formattedTimeline,
-        ratings: ratingsResult // <--- ส่ง ratings ไปด้วย
+        ratings: ratingsResult // <--- ส่ง ratings กลับไปให้ Frontend
       }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -114,17 +113,22 @@ export default async function handler(req) {
     // ==========================================
     if (req.method === 'POST') {
       let body;
+      
       try {
         const rawText = await req.text();
         if (!rawText) throw new Error("Empty request body");
         body = JSON.parse(rawText);
       } catch (e) {
         console.error("JSON Parse Error:", e);
-        return new Response(JSON.stringify({ message: 'Invalid JSON body', error: e.message }), { status: 400, headers: corsHeaders }); 
+        return new Response(JSON.stringify({ 
+            message: 'Invalid JSON body', 
+            error: e.message 
+        }), { status: 400, headers: corsHeaders }); 
       }
 
       const { action, case_id, user_id, ...data } = body;
 
+      // Prepare Officer Label
       let officerLabel = `เจ้าหน้าที่ ${user_id}`;
       if (user_id) {
         const officerRes = await sql`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
