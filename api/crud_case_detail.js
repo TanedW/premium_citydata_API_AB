@@ -1,11 +1,15 @@
+// /api/crud_case_detail.js
+
 import { neon } from '@neondatabase/serverless';
 
+// ✅ คงไว้ตามที่คุณต้องการ
 export const config = {
   runtime: 'edge',
 };
 
+// ---------------- CORS ----------------
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // แนะนำให้เปลี่ยนเป็น Domain จริงเมื่อขึ้น Production
+  'Access-Control-Allow-Origin': '*', // แนะนำให้ใส่ domain จริงเมื่อขึ้น Production
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
@@ -20,7 +24,7 @@ export default async function handler(req) {
 
   try {
     // ==========================================
-    // 1️⃣ GET: ดึงข้อมูลรายละเอียดเคส + Timeline
+    // 1️⃣ GET: ดึงข้อมูล (เหมือนเดิม)
     // ==========================================
     if (req.method === 'GET') {
       const { searchParams } = new URL(req.url);
@@ -33,7 +37,6 @@ export default async function handler(req) {
         });
       }
 
-      // Query 1: ข้อมูลหลัก
       const caseResult = await sql`
         SELECT 
             ic.*,
@@ -54,7 +57,6 @@ export default async function handler(req) {
         });
       }
 
-      // Query 2: Timeline
       const rawLogs = await sql`
         SELECT 
           cal.created_at, 
@@ -71,22 +73,13 @@ export default async function handler(req) {
         ORDER BY cal.created_at DESC
       `;
 
-      // จัดรูปแบบ Timeline
       const formattedTimeline = rawLogs.map(log => {
-        // 1. สร้างป้ายชื่อ: "เจ้าหน้าที่ 26 Taned Wongpoo"
         let changerLabel = `เจ้าหน้าที่ ${log.changed_by_user_id || 'ระบบ'}`;
         if (log.first_name || log.last_name) {
              const fullName = `${log.first_name || ''} ${log.last_name || ''}`.trim();
              changerLabel = `เจ้าหน้าที่ ${log.changed_by_user_id} ${fullName}`;
         }
-
-        // 2. ข้อความ Detail (ใช้ Comment ที่บันทึกไว้เป็นหลัก)
-        let description = log.comment;
-        
-        // Fallback กรณีข้อมูลเก่าที่ไม่มี Comment
-        if (!description || description.trim() === "") {
-             description = `เปลี่ยนสถานะเป็น ${log.new_value}`;
-        }
+        let description = log.comment || `เปลี่ยนสถานะเป็น ${log.new_value}`;
 
         return {
           status: log.new_value,
@@ -106,20 +99,31 @@ export default async function handler(req) {
     }
 
     // ==========================================
-    // 2️⃣ POST: รับคำสั่งแก้ไข (Action Based)
+    // 2️⃣ POST: รับคำสั่งแก้ไข (Edge Compatible)
     // ==========================================
     if (req.method === 'POST') {
       let body;
-      try { 
-        body = await req.json(); 
-      } catch (e) { 
-        return new Response(JSON.stringify({ message: 'Invalid JSON' }), { status: 400, headers: corsHeaders }); 
+      
+      // ✅ เทคนิคแก้ปัญหา Edge: อ่านเป็น Text ก่อน ค่อย Parse
+      try {
+        const rawText = await req.text(); // อ่าน Body ดิบๆ
+        if (!rawText) {
+             throw new Error("Empty request body");
+        }
+        body = JSON.parse(rawText); // แปลงเป็น JSON เอง
+      } catch (e) {
+        console.error("JSON Parse Error:", e);
+        return new Response(JSON.stringify({ 
+            message: 'Invalid JSON body', 
+            error: e.message 
+        }), { status: 400, headers: corsHeaders }); 
       }
 
       const { action, case_id, user_id, ...data } = body;
 
-      // 1. เตรียมชื่อเจ้าหน้าที่สำหรับบันทึก Log
-      // ผลลัพธ์: "เจ้าหน้าที่ 26 Taned Wongpoo"
+      // Debug ดูค่าที่ได้รับ
+      console.log("Edge Received:", { action, case_id });
+
       let officerLabel = `เจ้าหน้าที่ ${user_id}`;
       if (user_id) {
         const officerRes = await sql`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
@@ -129,38 +133,27 @@ export default async function handler(req) {
         }
       }
 
-      // --- Action: เปลี่ยนสถานะ (Target หลักของคุณ) ---
+      // --- Action: update_status ---
       if (action === 'update_status') {
-        // ❌ ไม่ต้องรับ old_status จาก body แล้ว
         const { new_status, comment, image_url } = data; 
         
-        // ✅ 1. ให้ Backend ดึงสถานะปัจจุบันจริงๆ จาก DB ก่อน
-        const currentCase = await sql`
-            SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id} LIMIT 1
-        `;
+        const currentCase = await sql`SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id} LIMIT 1`;
+        if (currentCase.length === 0) return new Response(JSON.stringify({ message: 'Case not found' }), { status: 404, headers: corsHeaders });
+        const realOldStatus = currentCase[0].status;
 
-        if (currentCase.length === 0) {
-            return new Response(JSON.stringify({ message: 'Case not found' }), { status: 404, headers: corsHeaders });
-        }
-
-        const realOldStatus = currentCase[0].status; // นี่คือสถานะเดิมที่แท้จริง
-
-        // 2. อัปเดตตารางหลัก
         await sql`UPDATE issue_cases SET status = ${new_status}, updated_at = NOW() WHERE issue_cases_id = ${case_id}`;
         
-        // 3. สร้างข้อความ Log
-        let fullLogComment = `${officerLabel} ปรับสถานะเป็น "${new_status}"`;
-        if (comment && comment.trim() !== "") fullLogComment += ` : ${comment}`;
-        if (image_url) fullLogComment += ` [แนบรูปประกอบ]`;
-
         if (image_url && image_url.trim() !== "") {
             await sql`
               INSERT INTO case_media (case_id, media_type, url, uploader_role) 
-              VALUES (${case_id}, 'image', ${image_url}, 'OFFICER')            
+              VALUES (${case_id}, 'image', ${image_url}, 'OFFICER')
             `;
         }
+
+        let fullLogComment = `${officerLabel} ปรับสถานะเป็น "${new_status}"`;
+        if (comment && comment.trim() !== "") fullLogComment += ` : ${comment}`;
+        if (image_url) fullLogComment += ` [แนบรูปประกอบ]`;
         
-        // 4. บันทึก Log (ใช้ realOldStatus ที่ดึงมาเอง)
         await sql`
           INSERT INTO case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
           VALUES (${case_id}, 'STATUS_CHANGE', ${realOldStatus}, ${new_status}, ${user_id || null}, ${fullLogComment})
@@ -171,7 +164,7 @@ export default async function handler(req) {
         });
       }
 
-      // --- Action: เปลี่ยนประเภท (คงไว้เผื่อแก้ไข) ---
+      // --- Action: update_category ---
       if (action === 'update_category') {
         const { new_type_id, new_type_name, old_type_name } = data;
         
