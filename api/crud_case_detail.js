@@ -1,15 +1,13 @@
 // /api/crud_case_detail.js
-
 import { neon } from '@neondatabase/serverless';
 
-// ✅ คงไว้ตามที่คุณต้องการ
 export const config = {
   runtime: 'edge',
 };
 
 // ---------------- CORS ----------------
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // แนะนำให้ใส่ domain จริงเมื่อขึ้น Production
+  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
@@ -24,7 +22,7 @@ export default async function handler(req) {
 
   try {
     // ==========================================
-    // 1️⃣ GET: ดึงข้อมูล (เหมือนเดิม)
+    // 1️⃣ GET: ดึงข้อมูล
     // ==========================================
     if (req.method === 'GET') {
       const { searchParams } = new URL(req.url);
@@ -37,6 +35,7 @@ export default async function handler(req) {
         });
       }
 
+      // --- Step 1: ดึงข้อมูล Case ---
       const caseResult = await sql`
         SELECT 
             ic.*,
@@ -57,6 +56,7 @@ export default async function handler(req) {
         });
       }
 
+      // --- Step 2: ดึง Timeline (Logs) ---
       const rawLogs = await sql`
         SELECT 
           cal.created_at, 
@@ -73,6 +73,15 @@ export default async function handler(req) {
         ORDER BY cal.created_at DESC
       `;
 
+      // --- Step 3: ดึง Ratings (เพิ่มใหม่ตรงนี้) ---
+      // ดึง score เพื่อส่งไปให้ Frontend คำนวณค่าเฉลี่ย
+      const ratingsResult = await sql`
+        SELECT score, comment, created_at 
+        FROM case_ratings 
+        WHERE case_id = ${id}
+      `;
+
+      // Format Timeline
       const formattedTimeline = rawLogs.map(log => {
         let changerLabel = `เจ้าหน้าที่ ${log.changed_by_user_id || 'ระบบ'}`;
         if (log.first_name || log.last_name) {
@@ -89,9 +98,11 @@ export default async function handler(req) {
         };
       });
 
+      // ส่ง response กลับไปรวมทั้ง info, timeline และ ratings
       return new Response(JSON.stringify({
         info: caseResult[0],
-        timeline: formattedTimeline
+        timeline: formattedTimeline,
+        ratings: ratingsResult // <--- ส่ง ratings ไปด้วย
       }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -103,26 +114,16 @@ export default async function handler(req) {
     // ==========================================
     if (req.method === 'POST') {
       let body;
-      
-      // ✅ เทคนิคแก้ปัญหา Edge: อ่านเป็น Text ก่อน ค่อย Parse
       try {
-        const rawText = await req.text(); // อ่าน Body ดิบๆ
-        if (!rawText) {
-             throw new Error("Empty request body");
-        }
-        body = JSON.parse(rawText); // แปลงเป็น JSON เอง
+        const rawText = await req.text();
+        if (!rawText) throw new Error("Empty request body");
+        body = JSON.parse(rawText);
       } catch (e) {
         console.error("JSON Parse Error:", e);
-        return new Response(JSON.stringify({ 
-            message: 'Invalid JSON body', 
-            error: e.message 
-        }), { status: 400, headers: corsHeaders }); 
+        return new Response(JSON.stringify({ message: 'Invalid JSON body', error: e.message }), { status: 400, headers: corsHeaders }); 
       }
 
       const { action, case_id, user_id, ...data } = body;
-
-      // Debug ดูค่าที่ได้รับ
-      console.log("Edge Received:", { action, case_id });
 
       let officerLabel = `เจ้าหน้าที่ ${user_id}`;
       if (user_id) {
