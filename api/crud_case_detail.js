@@ -38,16 +38,18 @@ export default async function handler(req) {
 
       // ✅ แก้ไข: เพิ่ม Subquery คำนวณ rating จากตาราง case_ratings
       const caseResult = await sql`
-        SELECT 
-            ic.*,
-            org.organization_name AS agency_name,
-            it.name AS issue_category_name,
-            (
-                SELECT COALESCE(ROUND(AVG(score)), 0)::int 
-                FROM case_ratings 
-                WHERE case_id = ic.issue_cases_id
-            ) AS rating
-        FROM issue_cases ic
+       SELECT 
+      ic.*,
+      org.organization_name AS agency_name,
+      it.name AS issue_category_name,
+      (
+          -- ✅ แก้ไข: ROUND(..., 1) คือเอาทศนิยม 1 ตำแหน่ง และ ::float เพื่อให้เป็นตัวเลข
+          SELECT COALESCE(ROUND(AVG(score), 1), 0)::float 
+          FROM case_ratings 
+          WHERE case_id = ic.issue_cases_id
+      ) AS rating
+  FROM issue_cases ic
+        
         LEFT JOIN case_organizations co ON ic.issue_cases_id = co.case_id
         LEFT JOIN organizations org ON co.organization_id = org.organization_id
         LEFT JOIN issue_types it ON ic.issue_type_id = it.issue_id 
