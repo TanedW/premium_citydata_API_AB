@@ -9,7 +9,8 @@ import { neon } from '@neondatabase/serverless';
 // ---------------- CORS ----------------
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // URL ของ Frontend
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  // !!! เพิ่ม PATCH เข้าไปในรายการ Methods !!!
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -70,24 +71,18 @@ export default async function handler(req) {
       // ดึงข้อมูลประกอบทั้งหมดเพื่อแมป
       const [issueTypes, caseOrgs, orgs] = await Promise.all([
         sql`SELECT issue_id, name FROM issue_types;`,
-        // case_id ในตารางนี้คือ issue_cases_id (UUID)
         sql`SELECT case_id, organization_id FROM case_organizations;`,
         sql`SELECT organization_id, organization_name FROM organizations;`,
       ]);
 
       // รวมข้อมูล
       const merged = cases.map((c) => {
-        // 1. หาประเภท (อันนี้ถูกต้อง)
         const type = issueTypes.find((t) => t.issue_id === c.issue_type_id);
 
-        // 2. (ที่แก้ไข) หา "ลิงก์" ทั้งหมดที่เชื่อมเคสนี้กับหน่วยงาน
-        //    (Code เดิม: .find((co) => co.issue_id === c.issue_id) <-- นี่คือจุดที่ผิด)
-        //    (Code แก้ไข: .filter((co) => co.case_id === c.issue_cases_id))
         const relatedLinks = caseOrgs.filter(
           (co) => co.case_id === c.issue_cases_id
         );
 
-        // 3. (ที่แก้ไข) แปลง "ลิงก์" ทั้งหมดให้เป็น "ข้อมูลหน่วยงาน" จริง
         const relatedOrgs = relatedLinks.map((link) => {
           const orgData = orgs.find(
             (o) => o.organization_id === link.organization_id
@@ -99,18 +94,16 @@ export default async function handler(req) {
               responsible_unit: orgData.organization_name,
             };
           }
-          // กรณีหา orgData ไม่เจอ (เช่น หน่วยงานถูกลบ แต่ลิงก์ยังอยู่)
           return {
             orgid: link.organization_id,
             responsible_unit: 'ไม่พบข้อมูลหน่วยงาน',
           };
         });
 
-        // 4. (ที่แก้ไข) คืน object ที่มี array ของ organizations
         return {
           ...c,
           issue_type_name: type ? type.name : 'ไม่ทราบประเภท',
-          organizations: relatedOrgs, // แทนที่ orgid และ responsible_unit เดิม
+          organizations: relatedOrgs,
         };
       });
 
@@ -136,11 +129,10 @@ export default async function handler(req) {
   // ============================================================
   // 2️⃣ POST — เพิ่มเคสใหม่
   // ============================================================
-    if (req.method === 'POST') {
+  if (req.method === 'POST') {
     let body; 
     
     try {
-      // 3.1. ดึงข้อมูลที่ส่งมาจาก Frontend
       body = await req.json();
       const {
         title,
@@ -151,11 +143,10 @@ export default async function handler(req) {
         longitude,
         tags,
         media_files,
-        user_id, // (Optional)
-        organization_ids // (!!! ใหม่ !!!) Array ของ ID หน่วยงาน (integer)
+        user_id,
+        organization_ids
       } = body;
       
-      // 3.2. ตรวจสอบข้อมูลจำเป็น
       if (!title || !issue_type_id || !latitude || !longitude) {
         return new Response(JSON.stringify({ message: 'Missing required fields: title, issue_type_id, latitude, and longitude are required.' }), {
           status: 400,
@@ -174,16 +165,13 @@ export default async function handler(req) {
         validUserId = user_id;
       }
       
-      // 3.3. (!!! หัวใจสำคัญ !!!)
-      // สร้าง ID ทั้งหมดขึ้นมาก่อน
       const newCaseId = crypto.randomUUID(); 
       const caseCode = generateCaseCode();
-      const defaultStatus = 'รอรับเรื่อง'; // สถานะเริ่มต้น
+      const defaultStatus = 'รอรับเรื่อง'; 
         
-      // 3.4. สร้าง "Array" ของ Queries (สำหรับ Vercel Edge)
       const queries = [];
 
-      // Step 1: Query สร้างเคสหลัก
+      // Step 1: Create Case
       queries.push(sql`
         INSERT INTO issue_cases (
           issue_cases_id, 
@@ -211,7 +199,7 @@ export default async function handler(req) {
         RETURNING *;
       `);
 
-      // Step 2: (ถ้ามี) Query สร้างไฟล์มีเดีย
+      // Step 2: Media Files
       if (media_files && media_files.length > 0) {
         for (const file of media_files) {
           queries.push(sql`
@@ -221,7 +209,7 @@ export default async function handler(req) {
         }
       }
 
-      // Step 3: Query สร้างประวัติ
+      // Step 3: Activity Log (CREATE)
       queries.push(sql`
         INSERT INTO case_activity_logs 
           (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
@@ -229,12 +217,9 @@ export default async function handler(req) {
           (${newCaseId}, ${validUserId}, 'CREATE', NULL, ${defaultStatus}, 'สร้างเคสใหม่');
       `);
 
-      // -----------------------------------------------------------
-      // (!!! นี่คือส่วนที่เพิ่มใหม่ !!!)
-      // Step 4: (ถ้ามี) Query จ่ายงานให้หน่วยงาน
+      // Step 4: Organization Links
       if (organization_ids && organization_ids.length > 0) {
         for (const orgId of organization_ids) {
-          // ตรวจสอบว่าเป็น Integer ที่ถูกต้อง
           if (typeof orgId === 'number' && Number.isInteger(orgId)) {
             queries.push(sql`
               INSERT INTO case_organizations (case_id, organization_id, is_viewed)
@@ -243,12 +228,8 @@ export default async function handler(req) {
           }
         }
       }
-      // -----------------------------------------------------------
       
-      // 3.5. !!! รัน Transaction (แบบ Array) !!!
       const results = await sql.transaction(queries);
-          
-      // 3.6. Transaction สำเร็จ
       const newCase = results[0]; 
       
       return new Response(JSON.stringify(newCase), { 
@@ -257,32 +238,108 @@ export default async function handler(req) {
       });
 
     } catch (error) {
-      // 3.7. จัดการ Error
       console.error("API Error (POST):", error);
-
       if (error.message && error.message.includes('unique constraint') && error.message.includes('issue_cases_case_code_key')) {
         return new Response(JSON.stringify({ 
           message: 'Case code collision. Please try submitting again.',
           error: error.message 
-        }), { 
-            status: 409, // 409 Conflict
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
       if (error.message && error.message.includes('violates foreign key constraint')) {
          return new Response(JSON.stringify({ 
           message: 'Invalid data. For example, issue_type_id, user_id, or organization_id does not exist.',
           error: error.message 
-        }), { 
-            status: 400, // 400 Bad Request
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
       
-      // Error อื่นๆ
       return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
-          status: 500, 
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+  }
+
+  // ============================================================
+  // 3️⃣ PATCH — อัปเดตสถานะ (!!! เพิ่มใหม่ !!!)
+  // ============================================================
+  if (req.method === 'PATCH') {
+    try {
+      const body = await req.json();
+      const {
+        case_id,        // ID ของเคส (UUID)
+        user_id,        // ID ของ User ที่ทำรายการ (Integer)
+        new_status,     // สถานะใหม่ เช่น 'ดำเนินการ', 'เสร็จสิ้น'
+        comment,        // รายละเอียดการดำเนินการ
+        media_url,      // (Optional) URL รูปภาพผลการทำงาน
+        media_type      // (Optional) เช่น 'image'
+      } = body;
+
+      // 3.1 ตรวจสอบข้อมูลจำเป็น
+      if (!case_id || !new_status || !user_id) {
+        return new Response(JSON.stringify({ 
+          message: 'Missing required fields: case_id, user_id, and new_status are required.' 
+        }), {
+          status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 3.2 ดึงสถานะเดิมก่อน (เพื่อเอามาลง Log)
+      const currentCase = await sql`
+        SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id} LIMIT 1
+      `;
+
+      if (currentCase.length === 0) {
+        return new Response(JSON.stringify({ message: 'Case not found' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      const oldStatus = currentCase[0].status;
+      const queries = [];
+
+      // Step 1: Query อัปเดตสถานะในตารางหลัก
+      queries.push(sql`
+        UPDATE issue_cases 
+        SET status = ${new_status}, updated_at = NOW()
+        WHERE issue_cases_id = ${case_id}
+      `);
+
+      // Step 2: Query บันทึก Log การเปลี่ยนแปลง (activity_type = 'STATUS_CHANGE')
+      queries.push(sql`
+        INSERT INTO case_activity_logs 
+          (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
+        VALUES
+          (${case_id}, ${user_id}, 'STATUS_CHANGE', ${oldStatus}, ${new_status}, ${comment || ''})
+      `);
+
+      // Step 3: (ถ้ามี) บันทึกรูปภาพประกอบการทำงาน
+      if (media_url) {
+        queries.push(sql`
+          INSERT INTO case_media (case_id, media_type, url)
+          VALUES (${case_id}, ${media_type || 'image'}, ${media_url})
+        `);
+      }
+
+      // 3.3 รัน Transaction
+      await sql.transaction(queries);
+
+      return new Response(JSON.stringify({ 
+        message: 'Status updated successfully',
+        prev_status: oldStatus,
+        new_status: new_status
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+
+    } catch (error) {
+      console.error("API Error (PATCH):", error);
+      return new Response(JSON.stringify({ 
+        message: 'Failed to update status',
+        error: error.message 
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
   }
