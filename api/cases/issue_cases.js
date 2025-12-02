@@ -215,8 +215,8 @@ export default async function handler(req) {
       if (media_files && media_files.length > 0) {
         for (const file of media_files) {
           queries.push(sql`
-            INSERT INTO case_media (case_id, media_type, url)
-            VALUES (${newCaseId}, ${file.media_type}, ${file.url})
+            INSERT INTO case_media (case_id, media_type, url, uploader_role)
+            VALUES (${newCaseId}, ${file.media_type}, ${file.url}, 'REPORTER' )
           `);
         }
       }

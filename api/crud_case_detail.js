@@ -152,6 +152,13 @@ export default async function handler(req) {
         let fullLogComment = `${officerLabel} ปรับสถานะเป็น "${new_status}"`;
         if (comment && comment.trim() !== "") fullLogComment += ` : ${comment}`;
         if (image_url) fullLogComment += ` [แนบรูปประกอบ]`;
+
+        if (image_url && image_url.trim() !== "") {
+            await sql`
+              INSERT INTO case_media (case_id, media_type, url, uploader_role) 
+              VALUES (${case_id}, 'image', ${image_url}, 'OFFICER')            
+            `;
+        }
         
         // 4. บันทึก Log (ใช้ realOldStatus ที่ดึงมาเอง)
         await sql`
