@@ -5,12 +5,13 @@ export const config = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': '*', // แนะนำให้เปลี่ยนเป็น Domain จริงเมื่อขึ้น Production
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
 export default async function handler(req) {
+  // 1. Handle CORS Preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -19,13 +20,18 @@ export default async function handler(req) {
 
   try {
     // ==========================================
-    // GET: ดึงข้อมูล
+    // 1️⃣ GET: ดึงข้อมูลรายละเอียดเคส + Timeline
     // ==========================================
     if (req.method === 'GET') {
       const { searchParams } = new URL(req.url);
       const id = searchParams.get('id');
 
-      if (!id) return new Response(JSON.stringify({ message: 'Missing id param' }), { status: 400, headers: corsHeaders });
+      if (!id) {
+        return new Response(JSON.stringify({ message: 'Missing id param' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
 
       // Query 1: ข้อมูลหลัก
       const caseResult = await sql`
@@ -41,10 +47,14 @@ export default async function handler(req) {
         LIMIT 1
       `;
 
-      if (caseResult.length === 0) return new Response(JSON.stringify({ message: 'Case not found' }), { status: 404, headers: corsHeaders });
+      if (caseResult.length === 0) {
+        return new Response(JSON.stringify({ message: 'Case not found' }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
 
       // Query 2: Timeline
-      // ดึงชื่อ first_name, last_name มาต่อกัน
       const rawLogs = await sql`
         SELECT 
           cal.created_at, 
@@ -53,106 +63,136 @@ export default async function handler(req) {
           cal.new_value, 
           cal.activity_type, 
           cal.comment,
-          CONCAT(u.first_name, ' ', u.last_name) AS changer_name
+          u.first_name,
+          u.last_name
         FROM case_activity_logs cal
         LEFT JOIN users u ON cal.changed_by_user_id = u.user_id
         WHERE cal.case_id = ${id} 
         ORDER BY cal.created_at DESC
       `;
 
+      // จัดรูปแบบ Timeline
       const formattedTimeline = rawLogs.map(log => {
-        let description = log.new_value;
-        
-        if (log.activity_type === 'TYPE_CHANGE') {
-             description = `เปลี่ยนประเภทจาก "${log.old_value}" เป็น "${log.new_value}"`;
-        } else if (log.activity_type === 'STATUS_CHANGE') { 
-             description = `เปลี่ยนสถานะจาก "${log.old_value}" เป็น "${log.new_value}"`;
-        } else if (log.old_value && log.old_value !== log.new_value) {
-             description = `เปลี่ยนจาก "${log.old_value}" เป็น "${log.new_value}"`;
-        } else if (!log.old_value) {
-             description = `สถานะเริ่มต้น: ${log.new_value}`;
+        // 1. สร้างป้ายชื่อ: "เจ้าหน้าที่ 26 Taned Wongpoo"
+        let changerLabel = `เจ้าหน้าที่ ${log.changed_by_user_id || 'ระบบ'}`;
+        if (log.first_name || log.last_name) {
+             const fullName = `${log.first_name || ''} ${log.last_name || ''}`.trim();
+             changerLabel = `เจ้าหน้าที่ ${log.changed_by_user_id} ${fullName}`;
         }
-        
-        if (log.comment) description += ` (${log.comment})`;
 
-        // *** จัดรูปแบบชื่อคนทำตามที่คุณต้องการ ***
-        // รูปแบบ: เจ้าหน้าที่ {ID} {ชื่อ นามสกุล}
-        const changer = log.changer_name 
-            ? `เจ้าหน้าที่ ${log.changed_by_user_id} ${log.changer_name}` 
-            : `เจ้าหน้าที่ ${log.changed_by_user_id}`;
+        // 2. ข้อความ Detail (ใช้ Comment ที่บันทึกไว้เป็นหลัก)
+        let description = log.comment;
+        
+        // Fallback กรณีข้อมูลเก่าที่ไม่มี Comment
+        if (!description || description.trim() === "") {
+             description = `เปลี่ยนสถานะเป็น ${log.new_value}`;
+        }
 
         return {
           status: log.new_value,
           detail: description,
           created_at: log.created_at,
-          changed_by: changer 
+          changed_by: changerLabel 
         };
       });
 
       return new Response(JSON.stringify({
         info: caseResult[0],
         timeline: formattedTimeline
-      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
     // ==========================================
-    // POST: อัปเดตข้อมูล
+    // 2️⃣ POST: รับคำสั่งแก้ไข (Action Based)
     // ==========================================
     if (req.method === 'POST') {
       let body;
-      try { body = await req.json(); } catch (e) { return new Response(JSON.stringify({ message: 'Invalid JSON' }), { status: 400, headers: corsHeaders }); }
+      try { 
+        body = await req.json(); 
+      } catch (e) { 
+        return new Response(JSON.stringify({ message: 'Invalid JSON' }), { status: 400, headers: corsHeaders }); 
+      }
 
       const { action, case_id, user_id, ...data } = body;
 
-      // 1. ดึงชื่อเจ้าหน้าที่ก่อน (เหมือน view.js)
-      let officerName = '';
+      // 1. เตรียมชื่อเจ้าหน้าที่สำหรับบันทึก Log
+      // ผลลัพธ์: "เจ้าหน้าที่ 26 Taned Wongpoo"
+      let officerLabel = `เจ้าหน้าที่ ${user_id}`;
       if (user_id) {
         const officerRes = await sql`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
         if (officerRes.length > 0) {
-            officerName = `${officerRes[0].first_name || ''} ${officerRes[0].last_name || ''}`.trim();
+            const fullName = `${officerRes[0].first_name || ''} ${officerRes[0].last_name || ''}`.trim();
+            officerLabel = `เจ้าหน้าที่ ${user_id} ${fullName}`;
         }
       }
-      const officerLabel = `เจ้าหน้าที่ ${user_id} ${officerName}`.trim();
 
-      // --- Action 1: เปลี่ยนประเภท ---
+      // --- Action: เปลี่ยนสถานะ (Target หลักของคุณ) ---
+      if (action === 'update_status') {
+        const { new_status, old_status, comment, image_url } = data; 
+        
+        // 1. อัปเดตตารางหลัก
+        await sql`UPDATE issue_cases SET status = ${new_status}, updated_at = NOW() WHERE issue_cases_id = ${case_id}`;
+        
+        // 2. สร้างข้อความ Log
+        // Ex: "เจ้าหน้าที่ 26 Taned Wongpoo ปรับสถานะเป็น เสร็จสิ้น : เรียบร้อยครับ [แนบรูปประกอบ]"
+        let fullLogComment = `${officerLabel} ปรับสถานะเป็น "${new_status}"`;
+        
+        if (comment && comment.trim() !== "") {
+            fullLogComment += ` : ${comment}`;
+        }
+        
+        if (image_url) {
+            fullLogComment += ` [แนบรูปประกอบ]`;
+        }
+        
+        // 3. บันทึก Log
+        await sql`
+          INSERT INTO case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
+          VALUES (${case_id}, 'STATUS_CHANGE', ${old_status}, ${new_status}, ${user_id || null}, ${fullLogComment})
+        `;
+
+        return new Response(JSON.stringify({ message: 'Status updated successfully' }), { 
+            status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
+      }
+
+      // --- Action: เปลี่ยนประเภท (คงไว้เผื่อแก้ไข) ---
       if (action === 'update_category') {
         const { new_type_id, new_type_name, old_type_name } = data;
         
         await sql`UPDATE issue_cases SET issue_type_id = ${new_type_id} WHERE issue_cases_id = ${case_id}`;
         
-        // ใส่ชื่อคนทำลงไปใน Comment ด้วย (ถ้าต้องการให้เหมือน view.js)
-        const comment = `${officerLabel} เปลี่ยนประเภทเป็น "${new_type_name}"`;
+        const fullComment = `${officerLabel} เปลี่ยนประเภทปัญหาเป็น "${new_type_name}"`;
         
         await sql`
           INSERT INTO case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
-          VALUES (${case_id}, 'TYPE_CHANGE', ${old_type_name}, ${new_type_name}, ${user_id || 'System'}, ${comment})
+          VALUES (${case_id}, 'TYPE_CHANGE', ${old_type_name}, ${new_type_name}, ${user_id || null}, ${fullComment})
         `;
-        return new Response(JSON.stringify({ message: 'Category updated' }), { status: 200, headers: corsHeaders });
+        
+        return new Response(JSON.stringify({ message: 'Category updated successfully' }), { 
+            status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
       }
 
-      // --- Action 2: เปลี่ยนสถานะ ---
-      if (action === 'update_status') {
-        const { new_status, old_status, comment, image_url } = data;
-        
-        await sql`UPDATE issue_cases SET status = ${new_status} WHERE issue_cases_id = ${case_id}`;
-        
-        // ใส่ชื่อคนทำลงไปใน Comment ด้วย
-        const logComment = `${officerLabel} ปรับสถานะ: ${comment}` + (image_url ? ` [แนบรูป: ${image_url}]` : '');
-        
-        await sql`
-          INSERT INTO case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
-          VALUES (${case_id}, 'STATUS_CHANGE', ${old_status}, ${new_status}, ${user_id || 'System'}, ${logComment})
-        `;
-        return new Response(JSON.stringify({ message: 'Status updated' }), { status: 200, headers: corsHeaders });
-      }
-
-      return new Response(JSON.stringify({ message: 'Unknown action' }), { status: 400, headers: corsHeaders });
+      return new Response(JSON.stringify({ message: 'Unknown action' }), { 
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      });
     }
 
-    return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { status: 405, headers: corsHeaders });
+    return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
+        status: 405, headers: corsHeaders 
+    });
 
   } catch (error) {
     console.error("API Error:", error);
-    return new Response(JSON.stringify({ message: 'Internal Server Error', error: error.message }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ 
+        message: 'Internal Server Error', 
+        error: error.message 
+    }), { 
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
   }
 }
