@@ -49,20 +49,42 @@ export default async function handler(req) {
 
       let cases;
       if (organization_id) {
-        // ดึงเฉพาะเคสที่เกี่ยวกับหน่วยงานนี้
+        // ✅ ปรับปรุง: ดึงเฉพาะเคสที่เกี่ยวกับหน่วยงานนี้ และเรียงตามสถานะ
         cases = await sql`
           SELECT ic.*
           FROM issue_cases ic
           JOIN case_organizations co ON ic.issue_cases_id = co.case_id
           WHERE co.organization_id = ${organization_id}
-          ORDER BY ic.created_at DESC
+          ORDER BY 
+            CASE ic.status
+              WHEN 'รอรับเรื่อง' THEN 1
+              WHEN 'กำลังประสานงาน' THEN 2
+              WHEN 'กำลังดำเนินการ' THEN 3
+              WHEN 'ส่งต่อ' THEN 4
+              WHEN 'เชิญร่วม' THEN 5
+              WHEN 'ปฏิเสธ' THEN 6
+              WHEN 'เสร็จสิ้น' THEN 7
+              ELSE 99
+            END ASC,
+            ic.created_at DESC
           LIMIT 100;
         `;
       } else {
-        // ดึงทั้งหมด
+        // ✅ ปรับปรุง: ดึงทั้งหมด และเรียงตามสถานะ
         cases = await sql`
           SELECT * FROM issue_cases
-          ORDER BY created_at DESC
+          ORDER BY 
+            CASE status
+              WHEN 'รอรับเรื่อง' THEN 1
+              WHEN 'กำลังประสานงาน' THEN 2
+              WHEN 'กำลังดำเนินการ' THEN 3
+              WHEN 'ส่งต่อ' THEN 4
+              WHEN 'เชิญร่วม' THEN 5
+              WHEN 'ปฏิเสธ' THEN 6
+              WHEN 'เสร็จสิ้น' THEN 7
+              ELSE 99
+            END ASC,
+            created_at DESC
           LIMIT 100;
         `;
       }
@@ -77,17 +99,15 @@ export default async function handler(req) {
 
       // รวมข้อมูล
       const merged = cases.map((c) => {
-        // 1. หาประเภท (อันนี้ถูกต้อง)
+        // 1. หาประเภท
         const type = issueTypes.find((t) => t.issue_id === c.issue_type_id);
 
-        // 2. (ที่แก้ไข) หา "ลิงก์" ทั้งหมดที่เชื่อมเคสนี้กับหน่วยงาน
-        //    (Code เดิม: .find((co) => co.issue_id === c.issue_id) <-- นี่คือจุดที่ผิด)
-        //    (Code แก้ไข: .filter((co) => co.case_id === c.issue_cases_id))
+        // 2. หา "ลิงก์" ทั้งหมดที่เชื่อมเคสนี้กับหน่วยงาน
         const relatedLinks = caseOrgs.filter(
           (co) => co.case_id === c.issue_cases_id
         );
 
-        // 3. (ที่แก้ไข) แปลง "ลิงก์" ทั้งหมดให้เป็น "ข้อมูลหน่วยงาน" จริง
+        // 3. แปลง "ลิงก์" ทั้งหมดให้เป็น "ข้อมูลหน่วยงาน" จริง
         const relatedOrgs = relatedLinks.map((link) => {
           const orgData = orgs.find(
             (o) => o.organization_id === link.organization_id
@@ -106,11 +126,11 @@ export default async function handler(req) {
           };
         });
 
-        // 4. (ที่แก้ไข) คืน object ที่มี array ของ organizations
+        // 4. คืน object ที่มี array ของ organizations
         return {
           ...c,
           issue_type_name: type ? type.name : 'ไม่ทราบประเภท',
-          organizations: relatedOrgs, // แทนที่ orgid และ responsible_unit เดิม
+          organizations: relatedOrgs, 
         };
       });
 
@@ -136,7 +156,7 @@ export default async function handler(req) {
   // ============================================================
   // 2️⃣ POST — เพิ่มเคสใหม่
   // ============================================================
-    if (req.method === 'POST') {
+  if (req.method === 'POST') {
     let body; 
     
     try {
@@ -152,7 +172,7 @@ export default async function handler(req) {
         tags,
         media_files,
         user_id, // (Optional)
-        organization_ids // (!!! ใหม่ !!!) Array ของ ID หน่วยงาน (integer)
+        organization_ids 
       } = body;
       
       // 3.2. ตรวจสอบข้อมูลจำเป็น
@@ -174,8 +194,7 @@ export default async function handler(req) {
         validUserId = user_id;
       }
       
-      // 3.3. (!!! หัวใจสำคัญ !!!)
-      // สร้าง ID ทั้งหมดขึ้นมาก่อน
+      // 3.3. สร้าง ID ทั้งหมดขึ้นมาก่อน
       const newCaseId = crypto.randomUUID(); 
       const caseCode = generateCaseCode();
       const defaultStatus = 'รอรับเรื่อง'; // สถานะเริ่มต้น
@@ -229,12 +248,9 @@ export default async function handler(req) {
           (${newCaseId}, ${validUserId}, 'CREATE', NULL, ${defaultStatus}, 'สร้างเคสใหม่');
       `);
 
-      // -----------------------------------------------------------
-      // (!!! นี่คือส่วนที่เพิ่มใหม่ !!!)
       // Step 4: (ถ้ามี) Query จ่ายงานให้หน่วยงาน
       if (organization_ids && organization_ids.length > 0) {
         for (const orgId of organization_ids) {
-          // ตรวจสอบว่าเป็น Integer ที่ถูกต้อง
           if (typeof orgId === 'number' && Number.isInteger(orgId)) {
             queries.push(sql`
               INSERT INTO case_organizations (case_id, organization_id, is_viewed)
@@ -243,9 +259,8 @@ export default async function handler(req) {
           }
         }
       }
-      // -----------------------------------------------------------
       
-      // 3.5. !!! รัน Transaction (แบบ Array) !!!
+      // 3.5. รัน Transaction (แบบ Array)
       const results = await sql.transaction(queries);
           
       // 3.6. Transaction สำเร็จ
@@ -279,7 +294,6 @@ export default async function handler(req) {
         });
       }
       
-      // Error อื่นๆ
       return new Response(JSON.stringify({ message: 'An error occurred', error: error.message }), { 
           status: 500, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
