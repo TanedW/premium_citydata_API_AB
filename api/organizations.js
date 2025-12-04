@@ -8,9 +8,9 @@ export const config = {
 
 // ตั้งค่า CORS Headers
 const corsHeaders = {
-  // **สำคัญ:** อย่าลืมเปลี่ยนเป็น URL ของ React App ของคุณ
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app',
-  'Access-Control-Allow-Methods': 'POST, PUT, OPTIONS', // อนุญาต POST และ PUT
+  // **สำคัญ:** อย่าลืมเปลี่ยนเป็น URL ของ React App ของคุณ หรือใช้ '*' เพื่อทดสอบ
+  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', 
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', // เพิ่ม GET เข้ามา
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -21,13 +21,47 @@ export default async function handler(req) {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  const sql = neon(process.env.DATABASE_URL);
+  try {
+    const sql = neon(process.env.DATABASE_URL);
 
-  // =========================================================
-  // SECTION 1: POST -> สร้างองค์กรใหม่
-  // =========================================================
-  if (req.method === 'POST') {
-    try {
+    // =========================================================
+    // SECTION 0: GET -> ดึงข้อมูลองค์กร (เพิ่มใหม่)
+    // =========================================================
+    if (req.method === 'GET') {
+      // ดึง query params จาก URL (เพราะ Edge Runtime ไม่มี req.query แบบปกติ)
+      const { searchParams } = new URL(req.url);
+      const id = searchParams.get('id');
+
+      if (!id) {
+        return new Response(JSON.stringify({ message: 'Organization ID is required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Query ข้อมูลจาก DB
+      const data = await sql`
+        SELECT * FROM organizations WHERE organization_id = ${id}
+      `;
+
+      if (data.length === 0) {
+        return new Response(JSON.stringify({ message: 'Organization not found' }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // ส่งข้อมูลกลับ (รายการแรก)
+      return new Response(JSON.stringify(data[0]), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // =========================================================
+    // SECTION 1: POST -> สร้างองค์กรใหม่
+    // =========================================================
+    if (req.method === 'POST') {
       const body = await req.json();
 
       // Map ข้อมูลจาก Frontend ให้ตรงกับ Database
@@ -57,20 +91,19 @@ export default async function handler(req) {
         });
       }
 
-      // Check Duplicate: เช็คว่ารหัสองค์กรซ้ำหรือไม่ (ยังคงต้องเช็คแม้ไม่ใช่ PK)
+      // Check Duplicate: เช็คว่ารหัสองค์กรซ้ำหรือไม่
       const existingOrg = await sql`
         SELECT organization_code FROM organizations WHERE "organization_code" = ${organization_code}
       `;
 
       if (existingOrg.length > 0) {
         return new Response(JSON.stringify({ message: 'Organization code already exists' }), {
-          status: 409, // 409 Conflict
+          status: 409,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
 
       // Insert Data
-      // หมายเหตุ: ไม่ต้องใส่ organization_id ใน VALUES เพราะ DB จะรันเลขให้เอง (SERIAL/IDENTITY)
       const newOrg = await sql`
         INSERT INTO organizations (
           organization_code, 
@@ -102,27 +135,17 @@ export default async function handler(req) {
         ) 
         RETURNING *; 
       `;
-      // RETURNING * จะส่งข้อมูลกลับมา รวมถึง 'organization_id' ที่เพิ่งสร้างด้วย
 
       return new Response(JSON.stringify(newOrg[0]), {
         status: 201,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
-
-    } catch (error) {
-      console.error("POST Error:", error);
-      return new Response(JSON.stringify({ message: 'Create Failed', error: error.message }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
     }
-  }
 
-  // =========================================================
-  // SECTION 2: PUT -> แก้ไขข้อมูล (โดยใช้ organization_id)
-  // =========================================================
-  if (req.method === 'PUT') {
-    try {
+    // =========================================================
+    // SECTION 2: PUT -> แก้ไขข้อมูล (โดยใช้ organization_id)
+    // =========================================================
+    if (req.method === 'PUT') {
       const body = await req.json();
       
       // รับค่า Primary Key
@@ -172,19 +195,19 @@ export default async function handler(req) {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
-
-    } catch (error) {
-      console.error("PUT Error:", error);
-      return new Response(JSON.stringify({ message: 'Update Failed', error: error.message }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
     }
-  }
 
-  // หากเรียก Method อื่น
-  return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), {
-    status: 405,
-    headers: corsHeaders
-  });
+    // หากเรียก Method อื่นที่ไม่รองรับ
+    return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), {
+      status: 405,
+      headers: corsHeaders
+    });
+
+  } catch (error) {
+    console.error("API Error:", error);
+    return new Response(JSON.stringify({ message: 'Internal Server Error', error: error.message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
 }
