@@ -47,7 +47,7 @@ export default async function handler(req) {
     // SQL Query: ดึงข้อมูลตามช่วงเวลา และ Group ตามวันที่
     const result = await sql`
       SELECT 
-        TO_CHAR(ic.created_at, ${dateFormat}) AS date,
+        TO_CHAR(ic.update_at, ${dateFormat}) AS date,
         COUNT(*) AS total,
         COUNT(*) FILTER (WHERE ic.status = 'รอรับเรื่อง') AS pending,
         COUNT(*) FILTER (WHERE ic.status = 'กำลังประสานงาน' OR ic.status = 'กำลังดำเนินการ') AS coordinating,
