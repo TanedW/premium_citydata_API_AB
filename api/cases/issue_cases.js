@@ -58,12 +58,11 @@ export default async function handler(req) {
           ORDER BY 
             CASE ic.status
               WHEN 'รอรับเรื่อง' THEN 1
-              WHEN 'กำลังประสานงาน' THEN 2
-              WHEN 'กำลังดำเนินการ' THEN 3
-              WHEN 'ส่งต่อ' THEN 4
-              WHEN 'เชิญร่วม' THEN 5
-              WHEN 'ปฏิเสธ' THEN 6
-              WHEN 'เสร็จสิ้น' THEN 7
+              WHEN 'กำลังดำเนินการ' THEN 2
+              WHEN 'ส่งต่อ' THEN 3
+              WHEN 'เชิญร่วม' THEN 4
+              WHEN 'ปฏิเสธ' THEN 5
+              WHEN 'เสร็จสิ้น' THEN 6
               ELSE 99
             END ASC,
             ic.created_at DESC
