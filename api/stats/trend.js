@@ -35,6 +35,8 @@ export default async function handler(req) {
 
     switch (range) {
       case '1w': intervalStr = '7 days'; dateFormat = 'DD/MM'; break;
+      case '2w': intervalStr = '14 days'; dateFormat = 'DD/MM'; break;
+      case '3w': intervalStr = '21 days'; dateFormat = 'DD/MM'; break;
       case '1m': intervalStr = '1 month'; dateFormat = 'DD/MM'; break;
       case '3m': intervalStr = '3 months'; dateFormat = 'MM/YYYY'; break; // เริ่มดูเป็นรายเดือน
       case '1y': intervalStr = '1 year'; dateFormat = 'MM/YYYY'; break;
