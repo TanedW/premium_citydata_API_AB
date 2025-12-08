@@ -50,7 +50,7 @@ export default async function handler(req) {
         TO_CHAR(ic.updated_at, ${dateFormat}) AS date,
         COUNT(*) AS total,
         COUNT(*) FILTER (WHERE ic.status = 'รอรับเรื่อง') AS pending,
-        COUNT(*) FILTER (WHERE ic.status = 'กำลังประสานงาน' OR ic.status = 'กำลังดำเนินการ') AS coordinating,
+        COUNT(*) FILTER (WHERE ic.status = 'กำลังดำเนินการ') AS coordinating,
         COUNT(*) FILTER (WHERE ic.status = 'เสร็จสิ้น') AS completed
       FROM issue_cases ic
       JOIN case_organizations co ON ic.issue_cases_id = co.case_id
