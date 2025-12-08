@@ -58,7 +58,7 @@ export default async function handler(req) {
         co.organization_id = ${organizationId}
         AND ic.update_at >= NOW() - ${intervalStr}::interval
       GROUP BY 1
-      ORDER BY MIN(ic.created_at) ASC;
+      ORDER BY MIN(ic.update_at) ASC;
     `;
 
     return new Response(JSON.stringify(result), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
