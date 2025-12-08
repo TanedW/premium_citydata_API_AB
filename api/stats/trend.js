@@ -23,7 +23,7 @@ export default async function handler(req) {
     // รับ Params
     const { searchParams } = new URL(req.url, `https:${req.headers.host}`);
     const organizationId = searchParams.get('organization_id');
-    const range = searchParams.get('range') || '1w'; // ค่า default คือ 1 สัปดาห์
+    const range = searchParams.get('range') || '1m'; // ค่า default คือ 1 สัปดาห์
 
     if (!organizationId) {
       return new Response(JSON.stringify({ message: 'Missing organization_id' }), { status: 400, headers: corsHeaders });
