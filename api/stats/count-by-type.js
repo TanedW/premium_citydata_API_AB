@@ -1,31 +1,25 @@
-
- //api/stats/count-by-type:
+// api/stats/count-by-type.js
 import { neon } from '@neondatabase/serverless';
 
 export const config = {
   runtime: 'edge',
 };
 
-// --- CORS Headers ---
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', // <-- URL ของ React App
+  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// --- Main API Handler ---
 export default async function handler(req) {
-  // 1. ตอบกลับ CORS Preflight (OPTIONS request)
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  // 2. จัดการเฉพาะ GET request
   if (req.method === 'GET') {
     const sql = neon(process.env.DATABASE_URL);
 
     try {
-      // 3. [สำคัญ] ตรวจสอบสิทธิ์ (เหมือน API อื่นๆ)
       const authHeader = req.headers.get('authorization');
       const accessToken = (authHeader && authHeader.startsWith('Bearer ')) 
         ? authHeader.split(' ')[1] 
@@ -47,22 +41,30 @@ export default async function handler(req) {
         });
       }
       
-      // 4. ดึง organization_id จาก Query String
       const { searchParams } = new URL(req.url, `https:${req.headers.host}`);
       const organizationId = searchParams.get('organization_id');
 
       if (!organizationId) {
         return new Response(JSON.stringify({ message: 'organization_id query parameter is required' }), { 
-          status: 400, // Bad Request
+          status: 400, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         });
       }
 
-      // 5. [Query หลัก] นับเคส, จัดกลุ่มตามประเภท, และ JOIN เพื่อเอา "ชื่อ" ประเภท
+      // --- ส่วนที่แก้ไข SQL ---
       const statsResult = await sql`
         SELECT 
           it.name AS issue_type_name, 
-          COUNT(ic.issue_cases_id) AS count
+          COUNT(ic.issue_cases_id) AS count,
+          
+          /* คำนวณเวลาเฉลี่ย (ชั่วโมง) เฉพาะเคสที่ 'เสร็จสิ้น' */
+          COALESCE(
+            AVG(
+              EXTRACT(EPOCH FROM (ic.updated_at - ic.created_at)) / 3600
+            ) FILTER (WHERE ic.status = 'เสร็จสิ้น'), 
+            0
+          ) AS avg_resolution_time
+
         FROM 
           issue_cases ic
         JOIN 
@@ -77,9 +79,6 @@ export default async function handler(req) {
           count DESC;
       `;
       
-      // 6. ส่งข้อมูลกลับ
-      // ผลลัพธ์จะเป็น Array เช่น:
-      // [ { "issue_type_name": "ถนน/ทางเท้า", "count": "42" }, { "issue_type_name": "ไฟฟ้า/ประปา", "count": "31" } ]
       return new Response(JSON.stringify(statsResult), { 
         status: 200, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -94,7 +93,6 @@ export default async function handler(req) {
     }
   }
 
-  // 3. ตอบกลับหากใช้ Method อื่น
   return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), { 
     status: 405, 
     headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
