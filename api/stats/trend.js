@@ -56,7 +56,7 @@ export default async function handler(req) {
       JOIN case_organizations co ON ic.issue_cases_id = co.case_id
       WHERE 
         co.organization_id = ${organizationId}
-        AND ic.created_at >= NOW() - ${intervalStr}::interval
+        AND ic.update_at >= NOW() - ${intervalStr}::interval
       GROUP BY 1
       ORDER BY MIN(ic.created_at) ASC;
     `;
