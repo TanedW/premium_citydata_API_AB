@@ -44,24 +44,44 @@ export default async function handler(req) {
       default:   intervalStr = '7 days';
     }
 
-    // SQL Query: ดึงข้อมูลตามช่วงเวลา และ Group ตามวันที่
+    // // SQL Query: ดึงข้อมูลตามช่วงเวลา และ Group ตามวันที่
+    // const result = await sql`
+    //   SELECT 
+    //     TO_CHAR(ic.updated_at, ${dateFormat}) AS date,
+    //     COUNT(*) AS total,
+    //     COUNT(*) FILTER (WHERE ic.status = 'รอรับเรื่อง') AS pending,
+    //     COUNT(*) FILTER (WHERE ic.status = 'กำลังดำเนินการ') AS action,
+    //     COUNT(*) FILTER (WHERE ic.status = 'ส่งต่อ') AS forward,
+    //     COUNT(*) FILTER (WHERE ic.status = 'เชิญร่วม') AS invite,
+    //     COUNT(*) FILTER (WHERE ic.status = 'ปฏิเสธ') AS rejecte,    
+    //     COUNT(*) FILTER (WHERE ic.status = 'เสร็จสิ้น') AS completed
+    //   FROM issue_cases ic
+    //   JOIN case_organizations co ON ic.issue_cases_id = co.case_id
+    //   WHERE 
+    //     co.organization_id = ${organizationId}
+    //     AND ic.updated_at >= NOW() - ${intervalStr}::interval
+    //   GROUP BY 1
+    //   ORDER BY MIN(ic.updated_at) ASC;
+    // `;
+
+        // SQL Query: ดึงข้อมูลตามช่วงเวลา และ Group ตามวันที่
     const result = await sql`
       SELECT 
-        TO_CHAR(ic.updated_at, ${dateFormat}) AS date,
+        TO_CHAR(ic.create_at, ${dateFormat}) AS date,
         COUNT(*) AS total,
-        COUNT(*) FILTER (WHERE ic.status = 'รอรับเรื่อง') AS pending,
-        COUNT(*) FILTER (WHERE ic.status = 'กำลังดำเนินการ') AS action,
-        COUNT(*) FILTER (WHERE ic.status = 'ส่งต่อ') AS forward,
-        COUNT(*) FILTER (WHERE ic.status = 'เชิญร่วม') AS invite,
-        COUNT(*) FILTER (WHERE ic.status = 'ปฏิเสธ') AS rejecte,    
-        COUNT(*) FILTER (WHERE ic.status = 'เสร็จสิ้น') AS completed
+        COUNT(*) FILTER (WHERE ic.new_value = 'รอรับเรื่อง') AS pending,
+        COUNT(*) FILTER (WHERE ic.new_value = 'กำลังดำเนินการ') AS action,
+        COUNT(*) FILTER (WHERE ic.new_value = 'ส่งต่อ') AS forward,
+        COUNT(*) FILTER (WHERE ic.new_value = 'เชิญร่วม') AS invite,
+        COUNT(*) FILTER (WHERE ic.new_value = 'ปฏิเสธ') AS rejecte,    
+        COUNT(*) FILTER (WHERE ic.new_value = 'เสร็จสิ้น') AS completed
       FROM issue_cases ic
-      JOIN case_organizations co ON ic.issue_cases_id = co.case_id
+      JOIN case_organizations co ON ic.case_activity_logs = co.case_id
       WHERE 
         co.organization_id = ${organizationId}
-        AND ic.updated_at >= NOW() - ${intervalStr}::interval
+        AND ic.create_at >= NOW() - ${intervalStr}::interval
       GROUP BY 1
-      ORDER BY MIN(ic.updated_at) ASC;
+      ORDER BY MIN(ic.create_at) ASC;
     `;
 
     return new Response(JSON.stringify(result), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
