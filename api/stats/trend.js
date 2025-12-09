@@ -68,7 +68,13 @@ export default async function handler(req) {
     const result = await sql`
       SELECT 
         TO_CHAR(ic.created_at, ${dateFormat}) AS date,
-        COUNT(*) AS total,
+
+/* --- แก้ไขตรงนี้ครับ --- */
+        COUNT(*) FILTER (
+          WHERE ic.new_value IN ('รอรับเรื่อง', 'กำลังดำเนินการ', 'ส่งต่อ', 'เชิญร่วม', 'ปฏิเสธ', 'เสร็จสิ้น')
+        ) AS total,
+        /* -------------------- */
+
         COUNT(*) FILTER (WHERE ic.new_value = 'รอรับเรื่อง') AS pending,
         COUNT(*) FILTER (WHERE ic.new_value = 'กำลังดำเนินการ') AS action,
         COUNT(*) FILTER (WHERE ic.new_value = 'ส่งต่อ') AS forward,
