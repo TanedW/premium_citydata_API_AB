@@ -11,17 +11,11 @@ const corsHeaders = {
 };
 
 export default async function handler(req) {
-  // Handle CORS
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== 'GET') return new Response(null, { status: 405, headers: corsHeaders });
 
   try {
     const sql = neon(process.env.DATABASE_URL);
-    
-    // --- ส่วน Authentication (ถ้ามี) ---
-    // ...
-
-    // รับ Params
     const { searchParams } = new URL(req.url, `https:${req.headers.host}`);
     const organizationId = searchParams.get('organization_id');
 
@@ -29,8 +23,6 @@ export default async function handler(req) {
       return new Response(JSON.stringify({ message: 'Missing organization_id' }), { status: 400, headers: corsHeaders });
     }
 
-    // SQL Query: ค้นหาเคสที่ "ใช้เวลานานที่สุด" 10 อันดับแรก
-// ...
     const result = await sql`
       WITH 
       first_action_log AS (
@@ -50,11 +42,11 @@ export default async function handler(req) {
         GROUP BY case_id
       )
 
-      -- 3. Main Query
       SELECT 
-        -- 🔴 แก้ไข: เปลี่ยนจาก ic.case_id เป็น ic.issue_cases_id
         ic.issue_cases_id as id,
-        ic.issue_type,
+        
+        -- ✅ แก้ไขจุดที่ 1: ดึงชื่อประเภทปัญหาจากตาราง issue_types
+        it.name as issue_type,
         
         EXTRACT(EPOCH FROM (COALESCE(fa.action_time, ff.finish_time, NOW()) - ic.created_at)) / 3600 as stage1_hours,
 
@@ -68,7 +60,10 @@ export default async function handler(req) {
 
       FROM issue_cases ic
       
-      -- 🔴 แก้ไข: ตรง ON ต้องใช้ชื่อคอลัมน์ให้ตรงกับตารางจริง (น่าจะเป็น issue_cases_id)
+      -- ✅ แก้ไขจุดที่ 2: JOIN กับตาราง issue_types เพื่อเอาชื่อมาแสดง
+      -- (สมมติว่าในตาราง issue_cases ชื่อคอลัมน์คือ issue_type ถ้าไม่ใช่ให้แก้เป็นชื่อจริง เช่น issue_type_id)
+      LEFT JOIN issue_types it ON ic.issue_type = it.issue_id
+
       JOIN case_organizations co ON ic.issue_cases_id = co.case_id
       LEFT JOIN first_action_log fa ON ic.issue_cases_id = fa.case_id
       LEFT JOIN first_finish_log ff ON ic.issue_cases_id = ff.case_id
@@ -79,13 +74,10 @@ export default async function handler(req) {
       ORDER BY total_hours DESC 
       LIMIT 10; 
     `;
-    // ...
 
-    // Format Data สำหรับกราฟ
     const formattedData = result.map(row => ({
-      id: row.id.substring(0, 8), // ตัด ID ให้สั้นลง (เช่น ticket-1234...)
-      type: row.issue_type,
-      // แปลงเป็นทศนิยม 2 ตำแหน่ง และป้องกันค่าติดลบ
+      id: String(row.id).substring(0, 8),
+      type: row.issue_type || 'ไม่ระบุ', // แสดงชื่อประเภทปัญหา (เช่น ไฟฟ้า)
       stage1: parseFloat(Math.max(0, parseFloat(row.stage1_hours || 0)).toFixed(2)),
       stage3: parseFloat(Math.max(0, parseFloat(row.stage3_hours || 0)).toFixed(2)),
       total: parseFloat(Math.max(0, parseFloat(row.total_hours || 0)).toFixed(2))
