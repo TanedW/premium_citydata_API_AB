@@ -76,7 +76,7 @@ export default async function handler(req) {
         COUNT(*) FILTER (WHERE ic.new_value = 'ปฏิเสธ') AS rejecte,    
         COUNT(*) FILTER (WHERE ic.new_value = 'เสร็จสิ้น') AS completed
       FROM case_activity_logs ic
-      JOIN case_organizations co ON ic.log_id = co.case_id
+      JOIN case_organizations co ON ic.case_id = co.case_id
       WHERE 
         co.organization_id = ${organizationId}
         AND ic.create_at >= NOW() - ${intervalStr}::interval
