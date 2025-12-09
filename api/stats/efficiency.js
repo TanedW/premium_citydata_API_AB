@@ -38,7 +38,7 @@ export default async function handler(req) {
           case_id, 
           MIN(created_at) as action_time 
         FROM case_activity_logs
-        WHERE new_value IN ('รอรับเรื่อง',) 
+        WHERE new_value IN ('รอรับเรื่อง') 
         GROUP BY case_id
       ),
 
