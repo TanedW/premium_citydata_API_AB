@@ -67,7 +67,7 @@ export default async function handler(req) {
         // SQL Query: ดึงข้อมูลตามช่วงเวลา และ Group ตามวันที่
     const result = await sql`
       SELECT 
-        TO_CHAR(ic.create_at, ${dateFormat}) AS date,
+        TO_CHAR(ic.created_at, ${dateFormat}) AS date,
         COUNT(*) AS total,
         COUNT(*) FILTER (WHERE ic.new_value = 'รอรับเรื่อง') AS pending,
         COUNT(*) FILTER (WHERE ic.new_value = 'กำลังดำเนินการ') AS action,
@@ -79,9 +79,9 @@ export default async function handler(req) {
       JOIN case_organizations co ON ic.case_id = co.case_id
       WHERE 
         co.organization_id = ${organizationId}
-        AND ic.create_at >= NOW() - ${intervalStr}::interval
+        AND ic.created_at >= NOW() - ${intervalStr}::interval
       GROUP BY 1
-      ORDER BY MIN(ic.create_at) ASC;
+      ORDER BY MIN(ic.created_at) ASC;
     `;
 
     return new Response(JSON.stringify(result), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
