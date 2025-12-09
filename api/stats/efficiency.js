@@ -71,9 +71,9 @@ export default async function handler(req) {
         EXTRACT(EPOCH FROM (COALESCE(ff.finish_time, NOW()) - ic.created_at)) / 3600 as total_hours
 
       FROM issue_cases ic
-      JOIN case_organizations co ON ic.issue_cases_id = co.case_id
-      LEFT JOIN first_action_log fa ON ic.issue_cases_id = fa.case_id
-      LEFT JOIN first_finish_log ff ON ic.issue_cases_id = ff.case_id
+      JOIN case_organizations co ON ic.case_id = co.case_id
+      LEFT JOIN first_action_log fa ON case_id = fa.case_id
+      LEFT JOIN first_finish_log ff ON ic.case_id = ff.case_id
       WHERE 
         co.organization_id = ${organizationId}
         AND ic.status = 'เสร็จสิ้น' -- เฉพาะงานที่ปิดแล้ว
