@@ -30,9 +30,9 @@ export default async function handler(req) {
     }
 
     // SQL Query: ค้นหาเคสที่ "ใช้เวลานานที่สุด" 10 อันดับแรก
+// ...
     const result = await sql`
       WITH 
-      -- 1. หาเวลาเริ่ม "รับเรื่อง/ดำเนินการ" (First Action)
       first_action_log AS (
         SELECT 
           case_id, 
@@ -41,8 +41,6 @@ export default async function handler(req) {
         WHERE new_value IN ('รอรับเรื่อง') 
         GROUP BY case_id
       ),
-
-      -- 2. หาเวลา "เสร็จสิ้น" (First Finish)
       first_finish_log AS (
         SELECT 
           case_id, 
@@ -54,32 +52,34 @@ export default async function handler(req) {
 
       -- 3. Main Query
       SELECT 
-        ic.case_id as id,
+        -- 🔴 แก้ไข: เปลี่ยนจาก ic.case_id เป็น ic.issue_cases_id
+        ic.issue_cases_id as id,
         ic.issue_type,
         
-        -- Stage 1: เวลาตั้งแต่ "แจ้ง" -> "เริ่มรับเรื่อง" (ชม.)
         EXTRACT(EPOCH FROM (COALESCE(fa.action_time, ff.finish_time, NOW()) - ic.created_at)) / 3600 as stage1_hours,
 
-        -- Stage 3: เวลาตั้งแต่ "เริ่มรับเรื่อง" -> "เสร็จสิ้น" (ชม.) (ใช้ key stage3 ให้ตรงกับสีกราฟ)
         CASE 
             WHEN ff.finish_time IS NOT NULL AND fa.action_time IS NOT NULL 
             THEN EXTRACT(EPOCH FROM (ff.finish_time - fa.action_time)) / 3600
             ELSE 0 
         END as stage3_hours,
 
-        -- Total: เวลารวมทั้งหมด (ใช้สำหรับเรียงลำดับหาคอขวด)
         EXTRACT(EPOCH FROM (COALESCE(ff.finish_time, NOW()) - ic.created_at)) / 3600 as total_hours
 
       FROM issue_cases ic
-      JOIN case_organizations co ON ic.case_id = co.case_id
-      LEFT JOIN first_action_log fa ON case_id = fa.case_id
-      LEFT JOIN first_finish_log ff ON ic.case_id = ff.case_id
+      
+      -- 🔴 แก้ไข: ตรง ON ต้องใช้ชื่อคอลัมน์ให้ตรงกับตารางจริง (น่าจะเป็น issue_cases_id)
+      JOIN case_organizations co ON ic.issue_cases_id = co.case_id
+      LEFT JOIN first_action_log fa ON ic.issue_cases_id = fa.case_id
+      LEFT JOIN first_finish_log ff ON ic.issue_cases_id = ff.case_id
+      
       WHERE 
         co.organization_id = ${organizationId}
-        AND ic.status = 'เสร็จสิ้น' -- เฉพาะงานที่ปิดแล้ว
-      ORDER BY total_hours DESC -- เรียงจาก "นานที่สุด" มาก่อน (หาคอขวด)
-      LIMIT 10; -- เอาแค่ Top 10
+        AND ic.status = 'เสร็จสิ้น' 
+      ORDER BY total_hours DESC 
+      LIMIT 10; 
     `;
+    // ...
 
     // Format Data สำหรับกราฟ
     const formattedData = result.map(row => ({
