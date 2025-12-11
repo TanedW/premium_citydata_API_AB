@@ -8,9 +8,9 @@ export const config = {
 
 // ตั้งค่า CORS Headers
 const corsHeaders = {
-  // **สำคัญ:** อย่าลืมเปลี่ยนเป็น URL ของ React App ของคุณ หรือใช้ '*' เพื่อทดสอบ
+  // **สำคัญ:** อย่าลืมเปลี่ยนเป็น URL ของ React App ของคุณ หรือใช้ '*' เพื่อทดสอบชั่วคราว
   'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', 
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', // เพิ่ม GET เข้ามา
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -25,11 +25,47 @@ export default async function handler(req) {
     const sql = neon(process.env.DATABASE_URL);
 
     // =========================================================
-    // SECTION 0: GET -> ดึงข้อมูลองค์กร (เพิ่มใหม่)
+    // SECTION 0: GET -> ดึงข้อมูลองค์กร (พร้อม DEBUG MODE)
     // =========================================================
     if (req.method === 'GET') {
-      // ดึง query params จาก URL (เพราะ Edge Runtime ไม่มี req.query แบบปกติ)
       const { searchParams } = new URL(req.url);
+
+      // -------------------------------------------------------
+      // 🛠️ DEBUG MODE START: ตรวจสอบ Database Schema
+      // วิธีใช้: เรียก URL /api/organizations?check_db_type=true
+      // -------------------------------------------------------
+      if (searchParams.get('check_db_type') === 'true') {
+        try {
+          // 1. เช็ค Data Type ของ column 'organization_id'
+          const typeCheck = await sql`
+            SELECT table_name, column_name, data_type, udt_name
+            FROM information_schema.columns
+            WHERE table_name = 'organizations'
+            AND column_name = 'organization_id';
+          `;
+          
+          // 2. เช็คชื่อ Database ที่กำลังเชื่อมต่ออยู่
+          const dbInfo = await sql`SELECT current_database(), current_user;`;
+
+          return new Response(JSON.stringify({
+            message: "DEBUG INFO",
+            connected_database: dbInfo[0],
+            column_schema: typeCheck
+          }), {
+            status: 200,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } catch (dbError) {
+           return new Response(JSON.stringify({ message: "Debug Error", error: dbError.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+      // -------------------------------------------------------
+      // 🛠️ DEBUG MODE END
+      // -------------------------------------------------------
+
       const id = searchParams.get('id');
 
       if (!id) {
@@ -64,12 +100,10 @@ export default async function handler(req) {
     if (req.method === 'POST') {
       const body = await req.json();
 
-      // Map ข้อมูลจาก Frontend ให้ตรงกับ Database
       const {
         organization_code,
         organization_name,
         admin_code,
-        // รับค่าได้ทั้ง key ที่มี _id หรือไม่มี (เผื่อ Frontend ส่งมาแบบเก่า)
         org_type_id = body.org_type || null,
         usage_type_id = body.usage_type || null,
         url_logo,
@@ -81,7 +115,6 @@ export default async function handler(req) {
         longitude
       } = body;
 
-      // Validation: ตรวจสอบค่าบังคับ
       if (!organization_code || !organization_name || !admin_code) {
         return new Response(JSON.stringify({
           message: 'Missing required fields: organization_code, organization_name, admin_code'
@@ -91,7 +124,6 @@ export default async function handler(req) {
         });
       }
 
-      // Check Duplicate: เช็คว่ารหัสองค์กรซ้ำหรือไม่
       const existingOrg = await sql`
         SELECT organization_code FROM organizations WHERE "organization_code" = ${organization_code}
       `;
@@ -103,35 +135,18 @@ export default async function handler(req) {
         });
       }
 
-      // Insert Data
       const newOrg = await sql`
         INSERT INTO organizations (
-          organization_code, 
-          organization_name,
-          admin_code, 
-          org_type_id,
-          usage_type_id,
-          url_logo,
-          district,
-          sub_district,
-          contact_phone,
-          province,
-          latitude,  
-          longitude
+          organization_code, organization_name, admin_code, 
+          org_type_id, usage_type_id, url_logo,
+          district, sub_district, contact_phone, province,
+          latitude, longitude
         ) 
         VALUES (
-          ${organization_code}, 
-          ${organization_name},
-          ${admin_code}, 
-          ${org_type_id},
-          ${usage_type_id},
-          ${url_logo || null},
-          ${district || null},
-          ${sub_district || null},
-          ${contact_phone || null},
-          ${province || null},
-          ${latitude || null},
-          ${longitude || null}
+          ${organization_code}, ${organization_name}, ${admin_code}, 
+          ${org_type_id}, ${usage_type_id}, ${url_logo || null},
+          ${district || null}, ${sub_district || null}, ${contact_phone || null}, ${province || null},
+          ${latitude || null}, ${longitude || null}
         ) 
         RETURNING *; 
       `;
@@ -143,12 +158,10 @@ export default async function handler(req) {
     }
 
     // =========================================================
-    // SECTION 2: PUT -> แก้ไขข้อมูล (โดยใช้ organization_id)
+    // SECTION 2: PUT -> แก้ไขข้อมูล
     // =========================================================
     if (req.method === 'PUT') {
       const body = await req.json();
-      
-      // รับค่า Primary Key
       const { organization_id } = body; 
 
       if (!organization_id) {
@@ -158,11 +171,10 @@ export default async function handler(req) {
         });
       }
 
-      // Map ข้อมูล (รองรับการส่งมาแค่บางส่วน)
       const org_type_id = body.org_type_id || body.org_type;
       const usage_type_id = body.usage_type_id || body.usage_type;
 
-      // 1. ตรวจสอบว่ามี ID นี้ในระบบหรือไม่
+      // ตรวจสอบว่ามี ID นี้หรือไม่
       const checkOrg = await sql`
         SELECT organization_id FROM organizations WHERE organization_id = ${organization_id}
       `;
@@ -174,7 +186,7 @@ export default async function handler(req) {
         });
       }
 
-      // 2. อัปเดตข้อมูล (ใช้ COALESCE เพื่ออัปเดตเฉพาะค่าที่ส่งมา ข้อมูลเดิมไม่หาย)
+      // อัปเดตข้อมูล
       const updatedOrg = await sql`
         UPDATE organizations SET
           organization_name = COALESCE(${body.organization_name || null}, organization_name),
@@ -197,7 +209,6 @@ export default async function handler(req) {
       });
     }
 
-    // หากเรียก Method อื่นที่ไม่รองรับ
     return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), {
       status: 405,
       headers: corsHeaders
