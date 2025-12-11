@@ -111,11 +111,11 @@ export default async function handler(req) {
 
       const targetOrg = orgCheck[0];
       const realOrganizationCode = targetOrg.organization_code; // รหัสจริงที่จะบันทึก
-      let assignedRole = 'MEMBER'; // Default เป็น Member
+      let assignedRole = 'member'; // Default เป็น Member
 
       // ตรวจสอบว่า Code ที่กรอกมา ตรงกับ admin_code หรือไม่
       if (targetOrg.admin_code && targetOrg.admin_code === input_code) {
-        assignedRole = 'ADMIN';
+        assignedRole = 'admin';
       }
       // -----------------------------------------------------------
 
