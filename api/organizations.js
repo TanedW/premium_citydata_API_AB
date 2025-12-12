@@ -1,22 +1,17 @@
 // /api/organizations.js
 import { neon } from '@neondatabase/serverless';
 
-// แนะนำให้ใช้ Edge Runtime ของ Vercel เพื่อประสิทธิภาพสูงสุด
 export const config = {
   runtime: 'edge',
 };
 
-// ตั้งค่า CORS Headers
 const corsHeaders = {
-  // **สำคัญ:** อย่าลืมเปลี่ยนเป็น URL ของ React App ของคุณ หรือใช้ '*' เพื่อทดสอบ
   'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', 
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', // เพิ่ม GET เข้ามา
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// ฟังก์ชันหลักของ API
 export default async function handler(req) {
-  // 1. ตอบกลับ request แบบ 'OPTIONS' (Preflight)
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -25,10 +20,9 @@ export default async function handler(req) {
     const sql = neon(process.env.DATABASE_URL);
 
     // =========================================================
-    // SECTION 0: GET -> ดึงข้อมูลองค์กร (เพิ่มใหม่)
+    // SECTION 0: GET -> ดึงข้อมูลองค์กร
     // =========================================================
     if (req.method === 'GET') {
-      // ดึง query params จาก URL (เพราะ Edge Runtime ไม่มี req.query แบบปกติ)
       const { searchParams } = new URL(req.url);
       const id = searchParams.get('id');
 
@@ -39,7 +33,6 @@ export default async function handler(req) {
         });
       }
 
-      // Query ข้อมูลจาก DB
       const data = await sql`
         SELECT * FROM organizations WHERE organization_id = ${id}
       `;
@@ -51,7 +44,6 @@ export default async function handler(req) {
         });
       }
 
-      // ส่งข้อมูลกลับ (รายการแรก)
       return new Response(JSON.stringify(data[0]), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -59,17 +51,15 @@ export default async function handler(req) {
     }
 
     // =========================================================
-    // SECTION 1: POST -> สร้างองค์กรใหม่
+    // SECTION 1: POST -> สร้างองค์กรใหม่ (เพิ่ม Hierarchy)
     // =========================================================
     if (req.method === 'POST') {
       const body = await req.json();
 
-      // Map ข้อมูลจาก Frontend ให้ตรงกับ Database
       const {
         organization_code,
         organization_name,
         admin_code,
-        // รับค่าได้ทั้ง key ที่มี _id หรือไม่มี (เผื่อ Frontend ส่งมาแบบเก่า)
         org_type_id = body.org_type || null,
         usage_type_id = body.usage_type || null,
         url_logo,
@@ -78,10 +68,12 @@ export default async function handler(req) {
         contact_phone,
         province,
         latitude,
-        longitude
+        longitude,
+        // --- [NEW] รับค่าสำหรับ Hierarchy ---
+        parent_id,       // ID ขององค์กรแม่ (ถ้ามี)
+        hierarchy_level  // ระดับชั้น เช่น 'Province', 'District'
       } = body;
 
-      // Validation: ตรวจสอบค่าบังคับ
       if (!organization_code || !organization_name || !admin_code) {
         return new Response(JSON.stringify({
           message: 'Missing required fields: organization_code, organization_name, admin_code'
@@ -91,7 +83,6 @@ export default async function handler(req) {
         });
       }
 
-      // Check Duplicate: เช็คว่ารหัสองค์กรซ้ำหรือไม่
       const existingOrg = await sql`
         SELECT organization_code FROM organizations WHERE "organization_code" = ${organization_code}
       `;
@@ -103,7 +94,7 @@ export default async function handler(req) {
         });
       }
 
-      // Insert Data
+      // --- [UPDATED] เพิ่ม column parent_id และ hierarchy_level ลงใน SQL ---
       const newOrg = await sql`
         INSERT INTO organizations (
           organization_code, 
@@ -117,7 +108,9 @@ export default async function handler(req) {
           contact_phone,
           province,
           latitude,  
-          longitude
+          longitude,
+          parent_id,       -- เพิ่มตรงนี้
+          hierarchy_level  -- เพิ่มตรงนี้
         ) 
         VALUES (
           ${organization_code}, 
@@ -131,7 +124,9 @@ export default async function handler(req) {
           ${contact_phone || null},
           ${province || null},
           ${latitude || null},
-          ${longitude || null}
+          ${longitude || null},
+          ${parent_id || null},       -- เพิ่มค่าที่รับมา
+          ${hierarchy_level || null}  -- เพิ่มค่าที่รับมา
         ) 
         RETURNING *; 
       `;
@@ -143,12 +138,10 @@ export default async function handler(req) {
     }
 
     // =========================================================
-    // SECTION 2: PUT -> แก้ไขข้อมูล (โดยใช้ organization_id)
+    // SECTION 2: PUT -> แก้ไขข้อมูล (รองรับการย้ายสังกัด/เปลี่ยนระดับ)
     // =========================================================
     if (req.method === 'PUT') {
       const body = await req.json();
-      
-      // รับค่า Primary Key
       const { organization_id } = body; 
 
       if (!organization_id) {
@@ -158,11 +151,9 @@ export default async function handler(req) {
         });
       }
 
-      // Map ข้อมูล (รองรับการส่งมาแค่บางส่วน)
       const org_type_id = body.org_type_id || body.org_type;
       const usage_type_id = body.usage_type_id || body.usage_type;
 
-      // 1. ตรวจสอบว่ามี ID นี้ในระบบหรือไม่
       const checkOrg = await sql`
         SELECT organization_id FROM organizations WHERE organization_id = ${organization_id}
       `;
@@ -174,7 +165,7 @@ export default async function handler(req) {
         });
       }
 
-      // 2. อัปเดตข้อมูล (ใช้ COALESCE เพื่ออัปเดตเฉพาะค่าที่ส่งมา ข้อมูลเดิมไม่หาย)
+      // --- [UPDATED] เพิ่มการ update parent_id และ hierarchy_level ---
       const updatedOrg = await sql`
         UPDATE organizations SET
           organization_name = COALESCE(${body.organization_name || null}, organization_name),
@@ -186,7 +177,9 @@ export default async function handler(req) {
           contact_phone     = COALESCE(${body.contact_phone || null}, contact_phone),
           province          = COALESCE(${body.province || null}, province),
           latitude          = COALESCE(${body.latitude || null}, latitude),
-          longitude         = COALESCE(${body.longitude || null}, longitude)
+          longitude         = COALESCE(${body.longitude || null}, longitude),
+          parent_id         = COALESCE(${body.parent_id || null}, parent_id),          -- เพิ่มตรงนี้
+          hierarchy_level   = COALESCE(${body.hierarchy_level || null}, hierarchy_level) -- เพิ่มตรงนี้
         WHERE organization_id = ${organization_id}
         RETURNING *;
       `;
@@ -197,7 +190,6 @@ export default async function handler(req) {
       });
     }
 
-    // หากเรียก Method อื่นที่ไม่รองรับ
     return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), {
       status: 405,
       headers: corsHeaders
