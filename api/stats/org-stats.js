@@ -11,6 +11,7 @@ const corsHeaders = {
 };
 
 export default async function handler(req) {
+  // 1. Handle CORS Preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -28,57 +29,69 @@ export default async function handler(req) {
   try {
     const sql = neon(process.env.DATABASE_URL);
 
-    // SQL Query ที่ปรับชื่อคอลัมน์แล้ว
+    // =====================================================================
+    // SQL QUERY UPDATED (รองรับ Status ภาษาไทย และโครงสร้างตารางใหม่)
+    // =====================================================================
     const stats = await sql`
       WITH RECURSIVE org_tree AS (
-          SELECT id, name, id as root_id 
+          -- 1. หาองค์กรแม่และลูกทั้งหมด (Hierarchy)
+          SELECT organization_id, organization_name
           FROM organizations 
-          WHERE organization_id = ${orgId} -- เช็คชื่อ ID ในตาราง organizations ให้ดีว่าเป็น id หรือ organization_id
+          WHERE organization_id = ${orgId} 
           
           UNION ALL
           
-          SELECT c.organization_id, c.organization_name, p.root_id
+          SELECT c.organization_id, c.organization_name
           FROM organizations c
-          INNER JOIN org_tree p ON c.parent_id = p.id
+          INNER JOIN org_tree p ON c.parent_id = p.organization_id
       )
       SELECT 
-          o.name,
-          o.id,
-          -- 1. Stacked Chart (ใช้คอลัมน์ 'status' แทน 'status_id')
-          COUNT(*) FILTER (WHERE i.status = 1) as pending,
-          COUNT(*) FILTER (WHERE i.status = 2) as coordinating,
-          COUNT(*) FILTER (WHERE i.status = 3) as in_progress,
-          COUNT(*) FILTER (WHERE i.status = 4) as forwarded,
-          COUNT(*) FILTER (WHERE i.status = 5) as rejected,
-          COUNT(*) FILTER (WHERE i.status = 6) as invited,
-          COUNT(*) FILTER (WHERE i.status = 7) as completed,
-          COUNT(i.issue_cases_id) as total_cases, -- แก้เป็น issue_cases_id
-
-          -- 2. Satisfaction (เนื่องจากไม่มี column rating ผมใส่ 0 ไว้ก่อน)
-          -- หากคุณเพิ่ม column 'rating' แล้ว ให้แก้เลข 0 เป็น i.rating
-          0::float as avg_score,
-          0 as total_reviews,
+          o.organization_name as name,
+          o.organization_id as id,
           
-          0 as star_5,
-          0 as star_4,
-          0 as star_3,
-          0 as star_2,
-          0 as star_1,
+          -- 2. นับสถานะ (Mapping ภาษาไทย ตาม SQL Insert)
+          -- ใช้ DISTINCT i.issue_cases_id เพื่อกันการนับซ้ำจากการ Join Rating
+          COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'รอรับเรื่อง') as pending,
+          COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'กำลังประสานงาน') as coordinating,
+          COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'กำลังดำเนินการ') as in_progress,
+          COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'ส่งต่อ') as forwarded,
+          COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'ปฏิเสธ') as rejected,
+          COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'เชิญร่วม') as invited,
+          COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'เสร็จสิ้น') as completed,
+          
+          -- ยอดรวมเคสทั้งหมด (ไม่ซ้ำ)
+          COUNT(DISTINCT i.issue_cases_id) as total_cases,
 
-          -- 3. Avg Time
+          -- 3. คำนวณคะแนนจากตาราง case_ratings (เชื่อมด้วย issue_case_id)
+          COALESCE(AVG(r.score), 0)::float as avg_score,
+          COUNT(r.score) as total_reviews,
+          
+          -- Breakdown ดาว
+          COUNT(r.score) FILTER (WHERE r.score = 5) as star_5,
+          COUNT(r.score) FILTER (WHERE r.score = 4) as star_4,
+          COUNT(r.score) FILTER (WHERE r.score = 3) as star_3,
+          COUNT(r.score) FILTER (WHERE r.score = 2) as star_2,
+          COUNT(r.score) FILTER (WHERE r.score = 1) as star_1,
+
+          -- 4. Avg Time (เวลาเฉลี่ย - เฉพาะสถานะ 'เสร็จสิ้น')
           COALESCE(
             AVG(EXTRACT(EPOCH FROM (i.updated_at - i.created_at))/86400) 
-            FILTER (WHERE i.status = 7), 0
+            FILTER (WHERE i.status = 'เสร็จสิ้น'), 0
           )::float as avg_days
 
       FROM org_tree o
-      -- *** สำคัญ: ต้องมี column organization_id ใน issue_cases เพื่อเชื่อมโยง ***
-      LEFT JOIN issue_cases i ON o.id = i.organization_id 
-      GROUP BY o.id, o.name
+      -- JOIN 1: องค์กร -> ตารางกลาง (case_organizations)
+      LEFT JOIN case_organizations co ON o.organization_id = co.organization_id
+      -- JOIN 2: ตารางกลาง -> ตัวเคส (issue_cases)
+      LEFT JOIN issue_cases i ON co.case_id = i.issue_cases_id
+      -- JOIN 3: ตัวเคส -> คะแนนรีวิว (case_ratings)
+      LEFT JOIN case_ratings r ON i.issue_cases_id = r.issue_case_id
+
+      GROUP BY o.organization_id, o.organization_name
       ORDER BY total_cases DESC;
     `;
 
-    // แปลงข้อมูล (Mapping)
+    // แปลงข้อมูลให้ตรง Format Frontend
     const stackedData = stats.map(item => ({
       name: item.name,
       pending: parseInt(item.pending),
@@ -95,14 +108,14 @@ export default async function handler(req) {
       id: index + 1,
       name: item.name,
       details: {
-        score: item.avg_score || 0,
+        score: parseFloat(item.avg_score.toFixed(2)),
         reviews: parseInt(item.total_reviews),
         breakdown: [
-          { stars: 5, percent: 0 }, // ยังคำนวณไม่ได้เพราะไม่มี rating
-          { stars: 4, percent: 0 },
-          { stars: 3, percent: 0 },
-          { stars: 2, percent: 0 },
-          { stars: 1, percent: 0 },
+          { stars: 5, percent: calcPercent(item.star_5, item.total_reviews) },
+          { stars: 4, percent: calcPercent(item.star_4, item.total_reviews) },
+          { stars: 3, percent: calcPercent(item.star_3, item.total_reviews) },
+          { stars: 2, percent: calcPercent(item.star_2, item.total_reviews) },
+          { stars: 1, percent: calcPercent(item.star_1, item.total_reviews) },
         ]
       }
     }));
@@ -128,4 +141,10 @@ export default async function handler(req) {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
+}
+
+// Helper Function
+function calcPercent(val, total) {
+  if (!total || total === 0) return 0;
+  return Math.round((parseInt(val) / parseInt(total)) * 100);
 }
