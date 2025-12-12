@@ -52,7 +52,6 @@ export default async function handler(req) {
           -- 2. นับสถานะ (Mapping ภาษาไทย ตาม SQL Insert)
           -- ใช้ DISTINCT i.issue_cases_id เพื่อกันการนับซ้ำจากการ Join Rating
           COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'รอรับเรื่อง') as pending,
-          COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'กำลังประสานงาน') as coordinating,
           COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'กำลังดำเนินการ') as in_progress,
           COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'ส่งต่อ') as forwarded,
           COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'ปฏิเสธ') as rejected,
