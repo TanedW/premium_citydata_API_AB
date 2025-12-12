@@ -1,6 +1,3 @@
-//api/dashboard/org-stats.js
-
-
 import { neon } from '@neondatabase/serverless';
 
 export const config = {
@@ -8,7 +5,7 @@ export const config = {
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // หรือใส่ Domain ของคุณ
+  'Access-Control-Allow-Origin': '*', 
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
@@ -31,66 +28,57 @@ export default async function handler(req) {
   try {
     const sql = neon(process.env.DATABASE_URL);
 
-    // ------------------------------------------------------------------
-    // SQL Query เดียวที่ดึงข้อมูลสรุปแยกตามหน่วยงาน (Group By Organization)
-    // ------------------------------------------------------------------
-    // 1. CTE: หาหน่วยงานทั้งหมดในสายบังคับบัญชา (Hierarchy)
-    // 2. LEFT JOIN: กับตาราง issue_cases เพื่อคำนวณสถิติ
-    // ------------------------------------------------------------------
+    // SQL Query ที่ปรับชื่อคอลัมน์แล้ว
     const stats = await sql`
       WITH RECURSIVE org_tree AS (
-          -- Anchor: เริ่มจากหน่วยงานที่ระบุ
           SELECT id, name, id as root_id 
           FROM organizations 
-          WHERE id = ${orgId} -- หรือ parent_id = ${orgId} ถ้าอยากดูแค่ลูก
+          WHERE organization_id = ${orgId} -- เช็คชื่อ ID ในตาราง organizations ให้ดีว่าเป็น id หรือ organization_id
           
           UNION ALL
           
-          -- Recursive: หาหน่วยงานลูก
-          SELECT c.id, c.name, p.root_id
+          SELECT c.organization_id, c.organization_name, p.root_id
           FROM organizations c
           INNER JOIN org_tree p ON c.parent_id = p.id
       )
       SELECT 
           o.name,
           o.id,
-          -- 1. ส่วนของ Stacked Chart (นับตามสถานะ)
-          -- ** ต้องแก้ status_id ให้ตรงกับ Database จริงของคุณ **
-          COUNT(*) FILTER (WHERE i.status_id = 1) as pending,      -- รอรับเรื่อง
-          COUNT(*) FILTER (WHERE i.status_id = 2) as coordinating, -- กำลังประสาน
-          COUNT(*) FILTER (WHERE i.status_id = 3) as in_progress,  -- กำลังดำเนินการ
-          COUNT(*) FILTER (WHERE i.status_id = 4) as forwarded,    -- ส่งต่อ
-          COUNT(*) FILTER (WHERE i.status_id = 5) as rejected,     -- ปฏิเสธ
-          COUNT(*) FILTER (WHERE i.status_id = 6) as invited,      -- เชิญร่วม
-          COUNT(*) FILTER (WHERE i.status_id = 7) as completed,    -- เสร็จสิ้น
-          COUNT(i.id) as total_cases,
+          -- 1. Stacked Chart (ใช้คอลัมน์ 'status' แทน 'status_id')
+          COUNT(*) FILTER (WHERE i.status = 1) as pending,
+          COUNT(*) FILTER (WHERE i.status = 2) as coordinating,
+          COUNT(*) FILTER (WHERE i.status = 3) as in_progress,
+          COUNT(*) FILTER (WHERE i.status = 4) as forwarded,
+          COUNT(*) FILTER (WHERE i.status = 5) as rejected,
+          COUNT(*) FILTER (WHERE i.status = 6) as invited,
+          COUNT(*) FILTER (WHERE i.status = 7) as completed,
+          COUNT(i.issue_cases_id) as total_cases, -- แก้เป็น issue_cases_id
 
-          -- 2. ส่วนของ Satisfaction (คะแนนรีวิว)
-          -- สมมติว่ามี column 'rating' (1-5) ในตาราง issue_cases หรือตาราง reviews
-          COALESCE(AVG(i.rating), 0)::float as avg_score,
-          COUNT(i.rating) as total_reviews,
+          -- 2. Satisfaction (เนื่องจากไม่มี column rating ผมใส่ 0 ไว้ก่อน)
+          -- หากคุณเพิ่ม column 'rating' แล้ว ให้แก้เลข 0 เป็น i.rating
+          0::float as avg_score,
+          0 as total_reviews,
           
-          -- Breakdown ดาว (สำหรับ Card)
-          COUNT(*) FILTER (WHERE i.rating = 5) as star_5,
-          COUNT(*) FILTER (WHERE i.rating = 4) as star_4,
-          COUNT(*) FILTER (WHERE i.rating = 3) as star_3,
-          COUNT(*) FILTER (WHERE i.rating = 2) as star_2,
-          COUNT(*) FILTER (WHERE i.rating = 1) as star_1,
+          0 as star_5,
+          0 as star_4,
+          0 as star_3,
+          0 as star_2,
+          0 as star_1,
 
-          -- 3. ส่วนของ Avg Time (เวลาเฉลี่ยเป็นวัน)
-          -- คำนวณจาก created_at ถึง updated_at (กรณีเสร็จสิ้น)
+          -- 3. Avg Time
           COALESCE(
             AVG(EXTRACT(EPOCH FROM (i.updated_at - i.created_at))/86400) 
-            FILTER (WHERE i.status_id = 7), 0
+            FILTER (WHERE i.status = 7), 0
           )::float as avg_days
 
       FROM org_tree o
-      LEFT JOIN issue_cases i ON o.id = i.organization_id
+      -- *** สำคัญ: ต้องมี column organization_id ใน issue_cases เพื่อเชื่อมโยง ***
+      LEFT JOIN issue_cases i ON o.id = i.organization_id 
       GROUP BY o.id, o.name
-      ORDER BY total_cases DESC; -- เรียงตามจำนวนเคส
+      ORDER BY total_cases DESC;
     `;
 
-    // แปลงข้อมูลให้ตรง Format ของ Frontend
+    // แปลงข้อมูล (Mapping)
     const stackedData = stats.map(item => ({
       name: item.name,
       pending: parseInt(item.pending),
@@ -104,18 +92,17 @@ export default async function handler(req) {
     }));
 
     const reportData = stats.map((item, index) => ({
-      id: index + 1, // ลำดับที่
+      id: index + 1,
       name: item.name,
       details: {
-        score: item.avg_score,
+        score: item.avg_score || 0,
         reviews: parseInt(item.total_reviews),
-        // คำนวณ % Breakdown เองที่นี่เพื่อให้ Frontend ใช้ง่าย
         breakdown: [
-          { stars: 5, percent: calcPercent(item.star_5, item.total_reviews) },
-          { stars: 4, percent: calcPercent(item.star_4, item.total_reviews) },
-          { stars: 3, percent: calcPercent(item.star_3, item.total_reviews) },
-          { stars: 2, percent: calcPercent(item.star_2, item.total_reviews) },
-          { stars: 1, percent: calcPercent(item.star_1, item.total_reviews) },
+          { stars: 5, percent: 0 }, // ยังคำนวณไม่ได้เพราะไม่มี rating
+          { stars: 4, percent: 0 },
+          { stars: 3, percent: 0 },
+          { stars: 2, percent: 0 },
+          { stars: 1, percent: 0 },
         ]
       }
     }));
@@ -136,15 +123,9 @@ export default async function handler(req) {
 
   } catch (error) {
     console.error("Stats Error:", error);
-    return new Response(JSON.stringify({ message: 'Server Error' }), {
+    return new Response(JSON.stringify({ message: 'Server Error', error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
-}
-
-// Helper คำนวณ %
-function calcPercent(val, total) {
-  if (!total || total === 0) return 0;
-  return Math.round((parseInt(val) / parseInt(total)) * 100);
 }
