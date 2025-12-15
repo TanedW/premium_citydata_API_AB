@@ -28,6 +28,7 @@ export default async function handler(req) {
   try {
     const sql = neon(process.env.DATABASE_URL);
 
+    // Query ข้อมูลรายหน่วยงาน (Child Orgs) โดยรวมข้อมูลทุกด้านไว้ใน Query เดียว
     const stats = await sql`
       WITH RECURSIVE org_tree AS (
           SELECT organization_id, organization_name
@@ -42,26 +43,20 @@ export default async function handler(req) {
           o.organization_name as name,
           o.organization_id as id,
           
-          -- [REMOVED] ลบ 'กำลังประสานงาน' ออกแล้ว
+          -- นับสถานะงาน (Workload)
           COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'รอรับเรื่อง') as pending,
-          -- COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'กำลังประสานงาน') as coordinating, <--- ลบ
           COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'กำลังดำเนินการ') as in_progress,
           COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'ส่งต่อ') as forwarded,
           COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'ปฏิเสธ') as rejected,
           COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'เชิญร่วม') as invited,
           COUNT(DISTINCT i.issue_cases_id) FILTER (WHERE i.status = 'เสร็จสิ้น') as completed,
-          
           COUNT(DISTINCT i.issue_cases_id) as total_cases,
 
+          -- ความพึงพอใจ (Satisfaction)
           COALESCE(AVG(r.score), 0)::float as avg_score,
           COUNT(r.score) as total_reviews,
-          
-          COUNT(r.score) FILTER (WHERE r.score = 5) as star_5,
-          COUNT(r.score) FILTER (WHERE r.score = 4) as star_4,
-          COUNT(r.score) FILTER (WHERE r.score = 3) as star_3,
-          COUNT(r.score) FILTER (WHERE r.score = 2) as star_2,
-          COUNT(r.score) FILTER (WHERE r.score = 1) as star_1,
 
+          -- เวลาเฉลี่ย SLA (Efficiency)
           COALESCE(
             AVG(EXTRACT(EPOCH FROM (i.updated_at - i.created_at))/86400) 
             FILTER (WHERE i.status = 'เสร็จสิ้น'), 0
@@ -76,58 +71,32 @@ export default async function handler(req) {
       ORDER BY total_cases DESC;
     `;
 
-    const stackedData = stats.map(item => ({
+    // Map ผลลัพธ์ให้เป็น Flat Object ตรงตาม Mockup ที่ใช้ใน Frontend
+    const org_stats = stats.map(item => ({
+      id: item.id,
       name: item.name,
+      total: parseInt(item.total_cases || 0),
       pending: parseInt(item.pending || 0),
-      // coordinating: parseInt(item.coordinating || 0), <--- ลบ key นี้ออก
       inProgress: parseInt(item.in_progress || 0),
+      completed: parseInt(item.completed || 0),
       forwarded: parseInt(item.forwarded || 0),
       rejected: parseInt(item.rejected || 0),
       invited: parseInt(item.invited || 0),
-      completed: parseInt(item.completed || 0),
-      total: parseInt(item.total_cases || 0)
+      satisfaction: parseFloat(item.avg_score.toFixed(2)),
+      reviews: parseInt(item.total_reviews || 0),
+      avgTime: parseFloat(item.avg_days.toFixed(1))
     }));
 
-    const reportData = stats.map((item, index) => ({
-      id: index + 1,
-      name: item.name,
-      details: {
-        score: parseFloat(item.avg_score.toFixed(2)),
-        reviews: parseInt(item.total_reviews),
-        breakdown: [
-          { stars: 5, percent: calcPercent(item.star_5, item.total_reviews) },
-          { stars: 4, percent: calcPercent(item.star_4, item.total_reviews) },
-          { stars: 3, percent: calcPercent(item.star_3, item.total_reviews) },
-          { stars: 2, percent: calcPercent(item.star_2, item.total_reviews) },
-          { stars: 1, percent: calcPercent(item.star_1, item.total_reviews) },
-        ]
-      }
-    }));
-
-    const avgTimeData = stats.map(item => ({
-      name: item.name,
-      value: parseFloat(item.avg_days.toFixed(1))
-    }));
-
-    return new Response(JSON.stringify({
-      stackedData,
-      reportData,
-      avgTimeData
-    }), {
+    return new Response(JSON.stringify(org_stats), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
   } catch (error) {
-    console.error("Stats Error:", error);
+    console.error("Org Stats Error:", error);
     return new Response(JSON.stringify({ message: 'Server Error', error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
-}
-
-function calcPercent(val, total) {
-  if (!total || total === 0) return 0;
-  return Math.round((parseInt(val) / parseInt(total)) * 100);
 }
