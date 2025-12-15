@@ -45,7 +45,7 @@ export default async function handler(req) {
       FROM issue_cases i
       JOIN case_organizations co ON i.issue_cases_id = co.case_id
       JOIN org_tree o ON co.organization_id = o.organization_id
-      LEFT JOIN issue_types t ON i.issue_type_id = t.issue_type_id
+      LEFT JOIN issue_types t ON i.issue_type_id = t.id
       WHERE t.issue_type_name IS NOT NULL
       GROUP BY t.issue_type_name
       ORDER BY count DESC
