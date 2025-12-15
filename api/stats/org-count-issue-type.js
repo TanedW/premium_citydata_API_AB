@@ -40,18 +40,18 @@ export default async function handler(req) {
           INNER JOIN org_tree p ON c.parent_id = p.organization_id
       )
       SELECT 
-          t.issue_type_name as name,
+          t.name as name,
           COUNT(DISTINCT i.issue_cases_id) as count
       FROM issue_cases i
       JOIN case_organizations co ON i.issue_cases_id = co.case_id
       JOIN org_tree o ON co.organization_id = o.organization_id
       LEFT JOIN issue_types t ON i.issue_type_id = t.issue_id
-      WHERE t.issue_type_name IS NOT NULL
-      GROUP BY t.issue_type_name
+      WHERE t.name IS NOT NULL
+      GROUP BY t.name
       ORDER BY count DESC
       LIMIT 10;
     `;
-    
+
 
     // Map ผลลัพธ์
     const problem_type_stats = problemTypes.map((item, index) => ({
