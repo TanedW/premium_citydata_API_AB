@@ -32,7 +32,7 @@ export default async function handler(req) {
         result = await sql`
           SELECT DISTINCT ic.status 
           FROM issue_cases ic
-          INNER JOIN case_organizations co ON ic.id = co.case_id 
+          INNER JOIN case_organizations co ON ic.issue_cases_id = co.case_id 
           WHERE co.organization_id = ${organization_id}
           AND ic.status IS NOT NULL
           ORDER BY ic.status ASC
