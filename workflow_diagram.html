@@ -47,8 +47,8 @@
     <h1>My Neon API Project - Workflow Diagrams</h1>
 
     <div class="diagram-container">
-        <h2>1. Authentication & User Management</h2>
-        <p class="description">Flows for User Login (users.js), Logout (logout.js), and User Logs (user_logs.js)</p>
+        <h2>1. การจัดการผู้ใช้และการยืนยันตัวตน</h2>
+        <p class="description">ขั้นตอนสำหรับการเข้าสู่ระบบ (users.js), ออกจากระบบ (logout.js), และบันทึกกิจกรรมผู้ใช้ (user_logs.js)</p>
         <pre class="mermaid">
 flowchart TD
     subgraph Login [POST /api/users]
@@ -84,8 +84,8 @@ flowchart TD
     </div>
 
     <div class="diagram-container">
-        <h2>2. Organization Management</h2>
-        <p class="description">Creating Organizations (organizations.js) and Joining them (users_organizations.js)</p>
+        <h2>2. การจัดการองค์กร</h2>
+        <p class="description">การสร้างองค์กร (organizations.js) และการเข้าร่วมองค์กร (users_organizations.js)</p>
         <pre class="mermaid">
 flowchart TD
     subgraph CreateOrg [POST /api/organizations]
@@ -119,9 +119,8 @@ flowchart TD
     </div>
 
     <div class="diagram-container">
-        <h2>3. Case Management System</h2>
-        <p class="description">Flows for Issue Cases (api/cases/issue_cases.js) and Case Viewing
-            (api/cases/[id]/view.js)</p>
+        <h2>3. ระบบจัดการเคส</h2>
+        <p class="description">ขั้นตอนสำหรับเคสปัญหา (api/cases/issue_cases.js) และการดูเคส (api/cases/[id]/view.js)</p>
         <pre class="mermaid">
 flowchart TD
     subgraph CreateCase [POST /api/cases/issue_cases]
@@ -167,8 +166,8 @@ flowchart TD
     </div>
 
     <div class="diagram-container">
-        <h2>4. Statistics & Dashboard</h2>
-        <p class="description">Analytics Endpoints (api/stats/*.js)</p>
+        <h2>4. สถิติและแดชบอร์ด</h2>
+        <p class="description">ปลายทาง API สำหรับการวิเคราะห์ข้อมูล (api/stats/*.js)</p>
         <pre class="mermaid">
 flowchart TD
     subgraph Stats [GET /api/stats/*]
@@ -194,8 +193,8 @@ flowchart TD
     </div>
 
     <div class="diagram-container">
-        <h2>5. Rating & Scoring System</h2>
-        <p class="description">Submitting Ratings (score.js)</p>
+        <h2>5. ระบบให้คะแนน</h2>
+        <p class="description">การส่งคะแนน (score.js)</p>
         <pre class="mermaid">
 flowchart TD
     subgraph SubmitRating [POST /api/score]
@@ -218,8 +217,8 @@ flowchart TD
     </div>
 
     <div class="diagram-container">
-        <h2>6. GPS & Utilities</h2>
-        <p class="description">Reverse Geocoding via Nominatim (GPS.js)</p>
+        <h2>6. GPS และยูทิลิตี้</h2>
+        <p class="description">การแปลงพิกัดเป็นที่อยู่ (Reverse Geocoding) ผ่าน Nominatim (GPS.js)</p>
         <pre class="mermaid">
 sequenceDiagram
     participant Client
