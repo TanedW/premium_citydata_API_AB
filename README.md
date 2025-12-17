@@ -29,41 +29,43 @@ erDiagram
         TEXT organization_name
         TIMESTAMPTZ created_at
         TEXT url_logo
-        UUID org_type_id FK
-        UUID usage_type_id FK
+        INTEGER org_type_id FK
+        INTEGER usage_type_id FK
         TEXT admin_code
         TEXT contact_phone
-        TEXT rovince    
-        TEXT district   
+        TEXT province
+        TEXT district
         TEXT sub_district
+        INTEGER parent_id FK
+        TEXT hierarchy_level
     }
     organization_types {
-        SERAIL org_type_id PK
+        SERIAL org_type_id PK
         TEXT type_value
         TEXT type_label
     }
     issue_types {
-        UUID issue_id PK
+        INTEGER issue_id PK
         TEXT name
         TEXT description
         TEXT icon_url
     }
     issue_cases {
         UUID issue_cases_id PK
-        VARCHAR(7) case_code
+        VARCHAR case_code
         TEXT title
         TEXT description
         TEXT cover_image_url
-        UUID issue_type_id FK
-        TEXT status "enum: case_status"
+        INTEGER issue_type_id FK
+        TEXT status
         NUMERIC latitude
         NUMERIC longitude
         TEXT[] tags
         TIMESTAMPTZ created_at
         TIMESTAMPTZ updated_at
     }
-    user_log {
-        SERAIL log_id PK
+    user_logs {
+        SERIAL log_id PK
         INTEGER user_id FK
         TEXT action_type
         TEXT provider
@@ -71,6 +73,7 @@ erDiagram
         TEXT user_agent
         TEXT status
         TIMESTAMPTZ created_at
+        TEXT details
     }
     users_organizations {
         INTEGER user_id PK, FK
@@ -84,6 +87,7 @@ erDiagram
         TEXT media_type
         TEXT url
         TIMESTAMPTZ created_at
+        TEXT uploader_role
     }
     case_organizations {
         UUID case_id PK, FK
@@ -94,102 +98,98 @@ erDiagram
         BIGSERIAL log_id PK
         UUID case_id FK
         INTEGER changed_by_user_id FK
-        TEXT activity_type "enum: case_activity_type"
+        TEXT activity_type
         TEXT old_value
         TEXT new_value
         TEXT comment
         TIMESTAMPTZ created_at
     }
-    case_ratings{
-    INTIGER rating_id PK
-    UUID issue_case_id FK
-    INTIGER user_id FK
-    SMALLINT score
-    TIMESPAMPTZ created_at
-    TEXT comment
+    case_ratings {
+        INTEGER rating_id PK
+        UUID issue_case_id FK
+        INTEGER user_id FK
+        SMALLINT score
+        TIMESTAMPTZ created_at
+        TEXT comment
     }
-    users               ||--o{ case_ratings : "gives"
-    issue_cases         ||--o{ case_ratings : "receives"
-    users               ||--|{ user_log : "has"
-    organization_types  ||--|{ organizations : "classifies"
-    usage_types         ||--|{ organizations : "classifies"
-    users               ||--o{ users_organizations : "is_member_of"
-    organizations       ||--o{ users_organizations : "has_member"
-    issue_cases         }o--|| issue_types : "has type"
-    issue_cases         ||--|{ case_media : "has media"
-    issue_cases         ||--|{ case_activity_logs : "has logs"
-    users               }o--|{ case_activity_logs : "changed by"
-    issue_cases         ||--o{ case_organizations : "assigned to"
-    organizations       ||--o{ case_organizations : "responsible for"
-
+    users ||--o{ case_ratings : "ให้คะแนน"
+    issue_cases ||--o{ case_ratings : "ได้รับคะแนน"
+    users ||--|{ user_logs : "มี"
+    organization_types ||--|{ organizations : "จัดประเภท"
+    usage_types ||--|{ organizations : "จัดประเภท"
+    organizations ||--o{ organizations : "เป็นหน่วยงานย่อยของ"
+    users ||--o{ users_organizations : "เป็นสมาชิกของ"
+    organizations ||--o{ users_organizations : "มีสมาชิก"
+    issue_cases }o--|| issue_types : "มีประเภท"
+    issue_cases ||--|{ case_media : "มีสื่อ"
+    issue_cases ||--|{ case_activity_logs : "มีประวัติ"
+    users }o--|{ case_activity_logs : "เปลี่ยนแปลงโดย"
+    issue_cases ||--o{ case_organizations : "ถูกมอบหมายให้"
+    organizations ||--o{ case_organizations : "รับผิดชอบ"
 ```
 
-คำอธิบายตาราง (Entities)
-1. users
-ตารางสำหรับเก็บข้อมูลผู้ใช้งานในระบบ
+### คำอธิบายตาราง (Entities)
 
-id (PK): รหัสอ้างอิงหลักของผู้ใช้
-email: อีเมลของผู้ใช้
-first_name: ชื่อจริง
-last_name: นามสกุล
-access_token: Token ที่ใช้ในการยืนยันตัวตนผ่าน API
-created_at: วันและเวลาที่สร้างบัญชีผู้ใช้
-providers: รายชื่อช่องทางที่ใช้ในการสมัคร/ล็อกอิน (เช่น ['google', 'facebook' , 'line'])
+1.  **users**
+    *   เก็บข้อมูลผู้ใช้งานในระบบ
+    *   `user_id`: รหัสอ้างอิงหลักของผู้ใช้ (Primary Key)
+    *   `email`: อีเมลของผู้ใช้
+    *   `first_name`: ชื่อจริง
+    *   `last_name`: นามสกุล
+    *   `access_token`: Token ที่ใช้ในการยืนยันตัวตนผ่าน API
+    *   `created_at`: วันและเวลาที่สร้างบัญชีผู้ใช้
+    *   `providers`: รายชื่อช่องทางที่ใช้ในการสมัคร/ล็อกอิน (เช่น `['google', 'facebook']`)
 
-2. organizations
-ตารางสำหรับเก็บข้อมูลหน่วยงานหรือองค์กร
+2.  **organizations**
+    *   เก็บข้อมูลหน่วยงานหรือองค์กร
+    *   `organization_id`: รหัสอ้างอิงหลักของหน่วยงาน (Primary Key)
+    *   `organization_code`: รหัสย่อของหน่วยงาน (Unique)
+    *   `organization_name`: ชื่อเต็มของหน่วยงาน
+    *   `created_at`: วันและเวลาที่สร้างหน่วยงาน
+    *   `org_type_id`: FK อ้างอิงถึง `organization_types`
+    *   `usage_type_id`: FK อ้างอิงถึง `usage_types`
+    *   `parent_id`: FK อ้างอิงถึง `organizations` (สำหรับโครงสร้างแบบลำดับชั้น)
+    *   `hierarchy_level`: ระดับของหน่วยงานในลำดับชั้น (เช่น 'Province', 'District')
 
-organization_id (PK): รหัสอ้างอิงหลักของหน่วยงาน
-organization_code: รหัสย่อของหน่วยงาน
-organization_name: ชื่อเต็มของหน่วยงาน
-created_at: วันและเวลาที่สร้างหน่วยงาน
+3.  **user_logs**
+    *   บันทึกกิจกรรม (logs) ทั้งหมดที่เกิดขึ้นจากผู้ใช้
+    *   `log_id`: รหัสอ้างอิงหลักของ Log (Primary Key)
+    *   `user_id`: FK อ้างอิงถึง `users`
+    *   `action_type`: ประเภทของกิจกรรม (เช่น `LOGIN`, `LOGOUT`, `CREATE_TICKET`)
+    *   `provider`: ช่องทางที่ผู้ใช้ล็อกอิน
+    *   `ip_address`: IP Address ของผู้ใช้
+    *   `created_at`: วันและเวลาที่เกิดกิจกรรม
 
-3. user_logs
-ตารางสำหรับบันทึกกิจกรรม (logs) ทั้งหมดที่เกิดขึ้นจากผู้ใช้
+4.  **users_organizations**
+    *   ตารางเชื่อม (Junction Table) สำหรับความสัมพันธ์ Many-to-Many ระหว่าง `users` และ `organizations`
+    *   `user_id`: FK อ้างอิงถึง `users` (Primary Key)
+    *   `organization_code`: FK อ้างอิงถึง `organizations` (Primary Key)
+    *   `role`: บทบาทของผู้ใช้ในหน่วยงาน (เช่น `admin`, `member`)
+    *   `joined_at`: วันและเวลาที่ผู้ใช้เข้าร่วมหน่วยงาน
 
-log_id (PK): รหัสอ้างอิงหลักของ Log
-user_id (FK): รหัสผู้ใช้ที่ก่อให้เกิดกิจกรรม (อ้างอิงถึง users.id)
-action_type: ประเภทของกิจกรรม (เช่น login, logout, create_ticket)
-provider: ช่องทางที่ผู้ใช้ล็อกอินเข้ามาในขณะนั้น
-ip_address: IP Address ของผู้ใช้
-created_at: วันและเวลาที่เกิดกิจกรรม
+5.  **issue_cases**
+    *   เก็บข้อมูลเคสหรือประเด็นปัญหา
+    *   `issue_cases_id`: รหัสอ้างอิงหลักของเคส (Primary Key)
+    *   `case_code`: รหัสของเคส
+    *   `title`: หัวข้อของเคส
+    *   `issue_type_id`: FK อ้างอิงถึง `issue_types`
+    *   `status`: สถานะของเคส (เช่น `รอรับเรื่อง`, `กำลังดำเนินการ`)
 
-4. users_organizations
-ตารางเชื่อม (Junction Table) สำหรับสร้างความสัมพันธ์แบบ Many-to-Many ระหว่าง users และ organizations
+6.  **case_activity_logs**
+    *   เก็บประวัติการเปลี่ยนแปลงของแต่ละเคส
+    *   `log_id`: รหัสอ้างอิงหลักของประวัติ (Primary Key)
+    *   `case_id`: FK อ้างอิงถึง `issue_cases`
+    *   `changed_by_user_id`: FK อ้างอิงถึง `users`
+    *   `activity_type`: ประเภทของกิจกรรม (เช่น `STATUS_CHANGE`, `COMMENT`)
+    *   `old_value`: ค่าเก่า
+    *   `new_value`: ค่าใหม่
+    *   `comment`: หมายเหตุเพิ่มเติม
 
-user_id (PK, FK): รหัสผู้ใช้ (อ้างอิงถึง users.id)
-organization_id (PK, FK): รหัสหน่วยงาน (อ้างอิงถึง organizations.organization_id)
-role: บทบาทของผู้ใช้ในหน่วยงานนั้นๆ (เช่น admin, member)
-joined_at: วันและเวลาที่ผู้ใช้เข้าร่วมหน่วยงาน
+7.  **case_ratings**
+    *   เก็บข้อมูลการให้คะแนนความพึงพอใจต่อเคส
+    *   `rating_id`: รหัสอ้างอิงหลัก (Primary Key)
+    *   `issue_case_id`: FK อ้างอิงถึง `issue_cases`
+    *   `user_id`: FK อ้างอิงถึง `users`
+    *   `score`: คะแนน (1-5)
+    *   `comment`: ความคิดเห็นเพิ่มเติม
 
-ความสัมพันธ์ (Relationships)
-
-ผู้ใช้ (users) กับ หน่วยงาน (organizations): เป็นความสัมพันธ์แบบ Many-to-Many ผู้ใช้ 1 คน สามารถสังกัดได้หลายหน่วยงาน หน่วยงาน 1 แห่ง สามารถมีผู้ใช้ได้หลายคน โดยมีความสัมพันธ์ผ่านตาราง users_organizations ซึ่งถ้ามีการ add user_id กับ organiation_id ก็จะดึงข้อมูลของ user และ organization เข้ามาในตาราง users_organizations 
-ผู้ใช้ (users) กับ ล็อก (user_logs): เป็นความสัมพันธ์แบบ One-to-Many ผู้ใช้ 1 คน สามารถมีประวัติการใช้งาน (logs) ได้หลายรายการ แต่ log 1 รายการ จะเป็นของผู้ใช้เพียงคนเดียวเท่านั้น
-
-## API Endpoints
-
-- `/api/GPS`: Reverse geocoding to get address from latitude and longitude.
-- `/api/cases/[id]/view`: Mark a case as viewed.
-- `/api/cases/issue_cases`: Get all issue cases or create a new issue case.
-- `/api/crud_case_detail`: Get case details and update case status or category.
-- `/api/doc`: API documentation.
-- `/api/get_issue_status`: Get all issue statuses.
-- `/api/get_issue_types`: Get all issue types.
-- `/api/logout`: Logout a user.
-- `/api/organization-types`: Get all organization types.
-- `/api/organizations`: Get, create, or update an organization.
-- `/api/score`: Get or submit a score for a case.
-- `/api/stats/count-by-type`: Get statistics on issue cases grouped by type.
-- `/api/stats/efficiency`: Get statistics on the efficiency of case resolution.
-- `/api/stats/org-count-issue-type`: Get statistics on issue cases for an organization grouped by type.
-- `/api/stats/org-stats`: Get statistics for an organization.
-- `/api/stats/overall-rating`: Get overall rating statistics.
-- `/api/stats/overview`: Get an overview of issue case statistics.
-- `/api/stats/staff-activities`: Get statistics on staff activities.
-- `/api/stats/staff-count`: Get the number of staff in an organization.
-- `/api/stats/trend`: Get the trend of issue cases over time.
-- `/api/usage-types`: Get all usage types.
-- `/api/user_logs`: Save user logs.
-- `/api/users`: Login or register a user.
-- `/api/users_organizations`: Get user-organization relations, or join an organization.
