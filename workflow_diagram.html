@@ -101,11 +101,14 @@ flowchart TD
         J_Start([Client requests Join]) --> J_Val{Validate IDs}
         J_Val -->|Invalid ID Error| J_Err404([Return 404 Not Found])
         J_Val -- OK --> J_Check{Already Joined?}
-        J_Check -- Yes --> J_Err409([Return 409 Conflict])
+        J_Check -- Yes --> J_CheckRole{Is Admin Code?}
+        J_CheckRole -- Yes --> J_Upgrade[Upgrade to Admin]
+        J_CheckRole -- No --> J_Err409([Return 409 Conflict])
         J_Check -- No --> J_Insert[Insert User-Org Link]
         J_Insert --> J_Log[Log 'JOIN ORGANIZATION']
+        J_Upgrade --> J_LogUpgrade[Log 'UPGRADE_TO_ADMIN']
         J_Log --> J_End([Return 201 Created])
-        
+        J_LogUpgrade --> J_End200([Return 200 OK])
     end
 
     subgraph GetOrgInfo [GET /api/users_organizations]
@@ -146,6 +149,17 @@ flowchart TD
         GC_Join --> GC_End([Return Case List])
     end
 
+    subgraph CRUDCase [POST /api/crud_case_detail]
+        CRUD_Start([Client sends Action]) --> CRUD_Parse{Parse Body}
+        CRUD_Parse --> CRUD_Action{action?}
+        CRUD_Action -- update_status --> CRUD_UpdateStatus[Update Status]
+        CRUD_Action -- update_category --> CRUD_UpdateCategory[Update Category]
+        CRUD_UpdateStatus --> CRUD_LogStatus[Log 'STATUS_CHANGE']
+        CRUD_UpdateCategory --> CRUD_LogCategory[Log 'TYPE_CHANGE']
+        CRUD_LogStatus --> CRUD_End([Return 200 OK])
+        CRUD_LogCategory --> CRUD_End
+    end
+
     subgraph ViewCase [PATCH /api/cases/:id/view]
         VC_Start([Officer Views Case]) --> VC_Val{Validate IDs}
         VC_Val -- Invalid --> VC_Err400([Return 400])
@@ -182,12 +196,20 @@ flowchart TD
         ST_Route -- /overall-rating --> ST_Q3[Query Avg Rating & Breakdown]
         ST_Route -- /staff-count --> ST_Q4[Query Staff Count]
         ST_Route -- /staff-activities --> ST_Q5[Query Staff Activity Logs]
+        ST_Route -- /org-stats --> ST_Q6[Query Org Stats]
+        ST_Route -- /org-count-issue-type --> ST_Q7[Query Org Issue Type Counts]
+        ST_Route -- /efficiency --> ST_Q8[Query Efficiency Stats]
+        ST_Route -- /trend --> ST_Q9[Query Trend Stats]
         
         ST_Q1 --> ST_End([Return JSON Data])
         ST_Q2 --> ST_End
         ST_Q3 --> ST_End
         ST_Q4 --> ST_End
         ST_Q5 --> ST_End
+        ST_Q6 --> ST_End
+        ST_Q7 --> ST_End
+        ST_Q8 --> ST_End
+        ST_Q9 --> ST_End
     end
         </pre>
     </div>
