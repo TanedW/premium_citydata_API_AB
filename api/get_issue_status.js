@@ -11,6 +11,7 @@ const corsHeaders = {
 };
 
 export default async function handler(req) {
+  // 1. Handle CORS Preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -19,23 +20,25 @@ export default async function handler(req) {
 
   if (req.method === 'GET') {
     try {
-      // 1. ดึง organization_id จาก URL Parameters
+      // 2. รับค่า organization_id จาก URL
       const { searchParams } = new URL(req.url);
       const organization_id = searchParams.get('organization_id');
 
       let result;
 
       if (organization_id) {
-        // กรณีระบุ Org ID: ดึงสถานะเฉพาะของหน่วยงานนั้น
+        // ✅ กรณีระบุ Org ID: ต้อง JOIN กับตาราง case_organizations (ตามรูปที่คุณส่งมา)
+        // สมมติว่า PK ของ issue_cases คือ 'id' (UUID) ที่ไปตรงกับ 'case_id'
         result = await sql`
-          SELECT DISTINCT status 
-          FROM issue_cases 
-          WHERE status IS NOT NULL 
-          AND organization_id = ${organization_id}
-          ORDER BY status ASC
+          SELECT DISTINCT ic.status 
+          FROM issue_cases ic
+          INNER JOIN case_organizations co ON ic.id = co.case_id 
+          WHERE co.organization_id = ${organization_id}
+          AND ic.status IS NOT NULL
+          ORDER BY ic.status ASC
         `;
       } else {
-        // กรณีไม่ระบุ (เผื่อไว้): ดึงสถานะทั้งหมดในระบบ
+        // ✅ กรณีไม่ระบุ: ดึงทั้งหมดจาก issue_cases ตรงๆ
         result = await sql`
           SELECT DISTINCT status 
           FROM issue_cases 
@@ -44,6 +47,7 @@ export default async function handler(req) {
         `;
       }
 
+      // แปลงผลลัพธ์เป็น Array ธรรมดา ['รอรับเรื่อง', 'เสร็จสิ้น', ...]
       const statuses = result.map(row => row.status);
 
       return new Response(JSON.stringify(statuses), {
@@ -52,7 +56,8 @@ export default async function handler(req) {
       });
 
     } catch (error) {
-      return new Response(JSON.stringify({ message: 'Fetch Failed', error: error.message }), {
+      console.error("Database Error:", error);
+      return new Response(JSON.stringify({ message: 'Fetch Status Failed', error: error.message }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
