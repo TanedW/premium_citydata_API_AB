@@ -166,3 +166,30 @@ joined_at: วันและเวลาที่ผู้ใช้เข้า
 
 ผู้ใช้ (users) กับ หน่วยงาน (organizations): เป็นความสัมพันธ์แบบ Many-to-Many ผู้ใช้ 1 คน สามารถสังกัดได้หลายหน่วยงาน หน่วยงาน 1 แห่ง สามารถมีผู้ใช้ได้หลายคน โดยมีความสัมพันธ์ผ่านตาราง users_organizations ซึ่งถ้ามีการ add user_id กับ organiation_id ก็จะดึงข้อมูลของ user และ organization เข้ามาในตาราง users_organizations 
 ผู้ใช้ (users) กับ ล็อก (user_logs): เป็นความสัมพันธ์แบบ One-to-Many ผู้ใช้ 1 คน สามารถมีประวัติการใช้งาน (logs) ได้หลายรายการ แต่ log 1 รายการ จะเป็นของผู้ใช้เพียงคนเดียวเท่านั้น
+
+## API Endpoints
+
+- `/api/GPS`: Reverse geocoding to get address from latitude and longitude.
+- `/api/cases/[id]/view`: Mark a case as viewed.
+- `/api/cases/issue_cases`: Get all issue cases or create a new issue case.
+- `/api/crud_case_detail`: Get case details and update case status or category.
+- `/api/doc`: API documentation.
+- `/api/get_issue_status`: Get all issue statuses.
+- `/api/get_issue_types`: Get all issue types.
+- `/api/logout`: Logout a user.
+- `/api/organization-types`: Get all organization types.
+- `/api/organizations`: Get, create, or update an organization.
+- `/api/score`: Get or submit a score for a case.
+- `/api/stats/count-by-type`: Get statistics on issue cases grouped by type.
+- `/api/stats/efficiency`: Get statistics on the efficiency of case resolution.
+- `/api/stats/org-count-issue-type`: Get statistics on issue cases for an organization grouped by type.
+- `/api/stats/org-stats`: Get statistics for an organization.
+- `/api/stats/overall-rating`: Get overall rating statistics.
+- `/api/stats/overview`: Get an overview of issue case statistics.
+- `/api/stats/staff-activities`: Get statistics on staff activities.
+- `/api/stats/staff-count`: Get the number of staff in an organization.
+- `/api/stats/trend`: Get the trend of issue cases over time.
+- `/api/usage-types`: Get all usage types.
+- `/api/user_logs`: Save user logs.
+- `/api/users`: Login or register a user.
+- `/api/users_organizations`: Get user-organization relations, or join an organization.
