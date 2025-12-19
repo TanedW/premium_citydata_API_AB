@@ -28,37 +28,33 @@ export default async function handler(req) {
   try {
     const sql = neon(process.env.DATABASE_URL);
 
-    // Query ประเภทปัญหา โดยรวมจากทุกหน่วยงานภายใต้ Org ID ที่ส่งมา
+    // Query ประเภทปัญหา โดยรวมจากทุกหน่วยงานภายใต้ Org ID ที่ส่งมา (ใช้ Closure Table)
     const problemTypes = await sql`
-      WITH RECURSIVE org_tree AS (
-          SELECT organization_id
-          FROM organizations 
-          WHERE organization_id = ${orgId} 
-          UNION ALL
-          SELECT c.organization_id
-          FROM organizations c
-          INNER JOIN org_tree p ON c.parent_id = p.organization_id
-      )
       SELECT 
           t.name as name,
           COUNT(DISTINCT i.issue_cases_id) as count
       FROM issue_cases i
       JOIN case_organizations co ON i.issue_cases_id = co.case_id
-      JOIN org_tree o ON co.organization_id = o.organization_id
+      
+      -- เชื่อมโยงกับ Closure Table เพื่อตรวจสอบว่า Case นี้อยู่ใน Org ภายใต้สังกัดหรือไม่
+      JOIN organization_hierarchy h ON co.organization_id = h.descendant_id
+      
       LEFT JOIN issue_types t ON i.issue_type_id = t.issue_id
-      WHERE t.name IS NOT NULL
+      
+      -- กรองเฉพาะ Case ที่เกิดในองค์กรที่มี ancestor_id ตรงกับ orgId ที่ส่งมา
+      WHERE h.ancestor_id = ${orgId}
+        AND t.name IS NOT NULL
+        
       GROUP BY t.name
       ORDER BY count DESC
       LIMIT 10;
     `;
-
 
     // Map ผลลัพธ์
     const problem_type_stats = problemTypes.map((item, index) => ({
       id: index + 1,
       name: item.name,
       count: parseInt(item.count || 0)
-      // สี (color) สามารถจัดการที่ Frontend ได้ หรือจะเพิ่ม Logic สุ่มสีที่นี่ก็ได้
     }));
 
     return new Response(JSON.stringify(problem_type_stats), {

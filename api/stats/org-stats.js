@@ -28,17 +28,9 @@ export default async function handler(req) {
   try {
     const sql = neon(process.env.DATABASE_URL);
 
-    // Query ข้อมูลรายหน่วยงาน (Child Orgs) โดยรวมข้อมูลทุกด้านไว้ใน Query เดียว
+    // Query ข้อมูลรายหน่วยงาน โดยใช้ Closure Table (organization_hierarchy)
+    // h.ancestor_id = orgId คือการหาลูกหลานทั้งหมดของ orgId นั้น
     const stats = await sql`
-      WITH RECURSIVE org_tree AS (
-          SELECT organization_id, organization_name
-          FROM organizations 
-          WHERE organization_id = ${orgId} 
-          UNION ALL
-          SELECT c.organization_id, c.organization_name
-          FROM organizations c
-          INNER JOIN org_tree p ON c.parent_id = p.organization_id
-      )
       SELECT 
           o.organization_name as name,
           o.organization_id as id,
@@ -62,16 +54,21 @@ export default async function handler(req) {
             FILTER (WHERE i.status = 'เสร็จสิ้น'), 0
           )::float as avg_days
 
-      FROM org_tree o
+      FROM organizations o
+      -- JOIN Closure Table เพื่อดึงเฉพาะ Org ที่เป็นลูกหลาน (หรือตัวเอง) ของ orgId ที่ส่งมา
+      JOIN organization_hierarchy h ON o.organization_id = h.descendant_id
+      
       LEFT JOIN case_organizations co ON o.organization_id = co.organization_id
       LEFT JOIN issue_cases i ON co.case_id = i.issue_cases_id
       LEFT JOIN case_ratings r ON i.issue_cases_id = r.issue_case_id
+
+      WHERE h.ancestor_id = ${orgId}
 
       GROUP BY o.organization_id, o.organization_name
       ORDER BY total_cases DESC;
     `;
 
-    // Map ผลลัพธ์ให้เป็น Flat Object ตรงตาม Mockup ที่ใช้ใน Frontend
+    // Map ผลลัพธ์ให้เป็น Flat Object ตรงตาม Mockup
     const org_stats = stats.map(item => ({
       id: item.id,
       name: item.name,
