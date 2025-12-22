@@ -93,8 +93,38 @@ flowchart TD
         C_Val -- Missing --> C_Err400([Return 400 Bad Request])
         C_Val -- OK --> C_Check{Org Code Exists?}
         C_Check -- Yes --> C_Err409([Return 409 Conflict])
-        C_Check -- No --> C_Insert[Insert New Organization]
-        C_Insert --> C_End([Return 201 Created])
+        C_Check -- No --> C_Parent{Has target_parent_id?}
+        C_Parent -- Yes --> C_FindParent[Find Parent Org]
+        C_FindParent -- Not Found --> C_Err404([Return 404 Parent Not Found])
+        C_FindParent -- Found --> C_Insert[Insert New Organization]
+        C_Parent -- No --> C_Insert
+        C_Insert --> C_Hierarchy[Build Hierarchy (Closure Table)]
+        C_Hierarchy --> C_End([Return 201 Created])
+    end
+
+    subgraph UpdateOrg [PUT /api/organizations/:id]
+        U_Start([Client sends Org Data & ID]) --> U_Val{Validate Req Fields & ID}
+        U_Val -- Invalid --> U_Err400([Return 400 Bad Request])
+        U_Val -- OK --> U_FindOrg{Org ID Exists?}
+        U_FindOrg -- No --> U_Err404([Return 404 Not Found])
+        U_FindOrg -- Yes --> U_Parent{Has target_parent_id?}
+        U_Parent -- Yes --> U_FindParent[Find Parent Org]
+        U_FindParent -- Not Found --> U_Err404_2([Return 404 Parent Not Found])
+        U_FindParent -- Found --> U_Update[Update Organization & Hierarchy]
+        U_Parent -- No --> U_Update
+        U_Update --> U_End([Return 200 OK])
+    end
+
+    subgraph GetOrg [GET /api/organizations]
+        G_Start([Client requests Org Info]) --> G_Param{Has query params?}
+        G_Param -- org_id --> G_FindOne[Find Specific Org]
+        G_Param -- is_root=true --> G_FindRoots[Find Root Orgs]
+        G_Param -- parent_id --> G_FindChildren[Find Children Orgs]
+        G_Param -- No --> G_FindAll[Find All Orgs]
+        G_FindOne --> G_End([Return Org Data])
+        G_FindRoots --> G_End
+        G_FindChildren --> G_End
+        G_FindAll --> G_End
     end
 
     subgraph JoinOrg [POST /api/users_organizations]
@@ -109,14 +139,6 @@ flowchart TD
         J_Upgrade --> J_LogUpgrade[Log 'UPGRADE_TO_ADMIN']
         J_Log --> J_End([Return 201 Created])
         J_LogUpgrade --> J_End200([Return 200 OK])
-    end
-
-    subgraph GetOrgInfo [GET /api/users_organizations]
-        G_Start([Client requests Info]) --> G_Type{Query Param?}
-        G_Type -- user_id --> G_ListOrgs[List User's Orgs]
-        G_Type -- org_code --> G_ListUsers[List Org's Users]
-        G_ListOrgs --> G_End([Return List])
-        G_ListUsers --> G_End
     end
         </pre>
     </div>
@@ -196,8 +218,8 @@ flowchart TD
         ST_Route -- /overall-rating --> ST_Q3[Query Avg Rating & Breakdown]
         ST_Route -- /staff-count --> ST_Q4[Query Staff Count]
         ST_Route -- /staff-activities --> ST_Q5[Query Staff Activity Logs]
-        ST_Route -- /org-stats --> ST_Q6[Query Org Stats]
-        ST_Route -- /org-count-issue-type --> ST_Q7[Query Org Issue Type Counts]
+        ST_Route -- /org-stats --> ST_Q6[Query Org Stats (incl. Sub-Orgs)]
+        ST_Route -- /org-count-issue-type --> ST_Q7[Query Org Issue Type Counts (incl. Sub-Orgs)]
         ST_Route -- /efficiency --> ST_Q8[Query Efficiency Stats]
         ST_Route -- /trend --> ST_Q9[Query Trend Stats]
         

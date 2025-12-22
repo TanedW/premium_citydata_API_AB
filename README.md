@@ -18,6 +18,7 @@ Entity-Relationship Diagram (ERD)
 2.  **การมอบหมายงานให้หน่วยงาน (Case Assignment)**:
     *   เมื่อเคสถูกสร้าง, ระบบจะมอบหมายเคสให้กับหน่วยงานที่เกี่ยวข้องโดยอัตโนมัติ (หรือโดย Admin)
     *   ข้อมูลการมอบหมายจะถูกบันทึกในตาราง `case_organizations` ซึ่งเชื่อมระหว่าง `issue_cases` และ `organizations`
+    *   **หมายเหตุ:** การสร้างหรืออัปเดตหน่วยงานสามารถกำหนดโครงสร้างลำดับชั้นได้โดยใช้พารามิเตอร์ `target_parent_id` เพื่อระบุหน่วยงานแม่
 
 3.  **เจ้าหน้าที่ตรวจสอบและรับเรื่อง (Case Viewing & Acknowledgment)**:
     *   เจ้าหน้าที่ของหน่วยงานล็อกอินเข้ามาในระบบและเห็นเคสที่ถูกมอบหมาย
@@ -36,6 +37,8 @@ Entity-Relationship Diagram (ERD)
     *   เจ้าหน้าที่ระดับสูงหรือผู้ดูแลระบบสามารถดูสถิติต่างๆ ผ่าน API ในกลุ่ม `/api/stats/` เช่น:
         *   `overview`: จำนวนเคสในแต่ละสถานะ
         *   `count-by-type`: จำนวนเคสแยกตามประเภทปัญหา
+        *   `org-stats`: สถิติการดำเนินงานสำหรับองค์กรและองค์กรย่อยทั้งหมด
+        *   `org-count-issue-type`: จำนวนเคสแยกตามประเภทปัญหาสำหรับองค์กรและองค์กรย่อยทั้งหมด
         *   `overall-rating`: คะแนนความพึงพอใจโดยรวม
         *   `staff-activities`: กิจกรรมของเจ้าหน้าที่
 
@@ -151,20 +154,20 @@ erDiagram
         TIMESTAMPTZ created_at
         TEXT comment
     }
-    users ||--o{ case_ratings : "ให้คะแนน"
-    issue_cases ||--o{ case_ratings : "ได้รับคะแนน"
-    users ||--|{ user_logs : "มี"
-    organization_types ||--|{ organizations : "จัดประเภท"
-    usage_types ||--|{ organizations : "จัดประเภท"
-    organizations ||--o{ organizations : "เป็นหน่วยงานย่อยของ"
-    users ||--o{ users_organizations : "เป็นสมาชิกของ"
-    organizations ||--o{ users_organizations : "มีสมาชิก"
-    issue_cases }o--|| issue_types : "มีประเภท"
-    issue_cases ||--|{ case_media : "มีสื่อ"
-    issue_cases ||--|{ case_activity_logs : "มีประวัติ"
-    users }o--|{ case_activity_logs : "เปลี่ยนแปลงโดย"
-    issue_cases ||--o{ case_organizations : "ถูกมอบหมายให้"
-    organizations ||--o{ case_organizations : "รับผิดชอบ"
+    users ||--o{ case_ratings : "rates"
+    issue_cases ||--o{ case_ratings : "rated by"
+    users ||--|{ user_logs : "has"
+    organization_types ||--|{ organizations : "categorizes"
+    usage_types ||--|{ organizations : "categorizes"
+    organizations ||--o{ organizations : "parent of"
+    users ||--o{ users_organizations : "is member of"
+    organizations ||--o{ users_organizations : "has members"
+    issue_cases }o--|| issue_types : "has type"
+    issue_cases ||--|{ case_media : "has media"
+    issue_cases ||--|{ case_activity_logs : "has history"
+    users }o--|{ case_activity_logs : "changed by"
+    issue_cases ||--o{ case_organizations : "assigned to"
+    organizations ||--o{ case_organizations : "responsible for"
 ```
 
 ### คำอธิบายตาราง (Entities)
