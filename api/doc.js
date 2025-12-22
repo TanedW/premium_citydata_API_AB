@@ -332,6 +332,99 @@ const swaggerDocument = {
         responses: { '200': { description: 'Updated' } }
       }
     },
+    '/api/crud_case_detail': {
+      get: {
+        summary: 'Get Case Details & Timeline',
+        tags: ['Cases'],
+        parameters: [{ name: 'id', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'Case details and timeline',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    info: {
+                      type: 'object',
+                      properties: {
+                        issue_cases_id: { type: 'string', format: 'uuid' },
+                        case_code: { type: 'string' },
+                        title: { type: 'string' },
+                        description: { type: 'string' },
+                        cover_image_url: { type: 'string' },
+                        issue_type_id: { type: 'integer' },
+                        status: { type: 'string' },
+                        latitude: { type: 'number' },
+                        longitude: { type: 'number' },
+                        tags: { type: 'array', items: { type: 'string' } },
+                        created_at: { type: 'string', format: 'date-time' },
+                        updated_at: { type: 'string', format: 'date-time' },
+                        agency_name: { type: 'string' },
+                        issue_category_name: { type: 'string' },
+                        rating: { type: 'number' }
+                      }
+                    },
+                    timeline: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          status: { type: 'string' },
+                          detail: { type: 'string' },
+                          created_at: { type: 'string', format: 'date-time' },
+                          changed_by: { type: 'string' }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      post: {
+        summary: 'Update Case Details',
+        tags: ['Cases'],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  action: { type: 'string', enum: ['update_status', 'update_category'] },
+                  case_id: { type: 'string', format: 'uuid' },
+                  user_id: { type: 'integer' },
+                  data: {
+                    type: 'object',
+                    oneOf: [
+                      {
+                        properties: {
+                          new_status: { type: 'string' },
+                          comment: { type: 'string' },
+                          image_url: { type: 'string' }
+                        }
+                      },
+                      {
+                        properties: {
+                          new_type_id: { type: 'integer' },
+                          new_type_name: { type: 'string' },
+                          old_type_name: { type: 'string' }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          '200': { description: 'Update successful' }
+        }
+      }
+    },
 
     // --- 4. Scoring ---
     '/api/score': {
@@ -396,6 +489,131 @@ const swaggerDocument = {
         responses: { '200': { description: 'Success', content: { 'application/json': { schema: { $ref: '#/components/schemas/Stat_StaffCount' } } } } }
       }
     },
+    '/api/stats/efficiency': {
+      get: {
+        summary: 'Get Efficiency Stats',
+        tags: ['Stats'],
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'organization_id', in: 'query', required: true, schema: { type: 'integer' } }],
+        responses: {
+          '200': {
+            description: 'Efficiency statistics',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    avg_days_to_close: { type: 'number' },
+                    avg_days_to_view: { type: 'number' }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/api/stats/org-count-issue-type': {
+      get: {
+        summary: 'Get Issue Type Counts for an Org and its Sub-Orgs',
+        tags: ['Stats'],
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'org_id', in: 'query', required: true, schema: { type: 'integer' } }],
+        responses: {
+          '200': {
+            description: 'An array of issue type counts',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'integer' },
+                      name: { type: 'string' },
+                      count: { type: 'integer' }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/api/stats/org-stats': {
+      get: {
+        summary: 'Get Operational Stats for an Org and its Sub-Orgs',
+        tags: ['Stats'],
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'org_id', in: 'query', required: true, schema: { type: 'integer' } }],
+        responses: {
+          '200': {
+            description: 'An array of operational stats for each organization',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'integer' },
+                      name: { type: 'string' },
+                      total: { type: 'integer' },
+                      pending: { type: 'integer' },
+                      inProgress: { type: 'integer' },
+                      completed: { type: 'integer' },
+                      forwarded: { type: 'integer' },
+                      rejected: { type: 'integer' },
+                      invited: { type: 'integer' },
+                      satisfaction: { type: 'number' },
+                      reviews: { type: 'integer' },
+                      avgTime: { type: 'number' }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/api/stats/trend': {
+      get: {
+        summary: 'Get Case Trend Stats',
+        tags: ['Stats'],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'organization_id', in: 'query', required: true, schema: { type: 'integer' } },
+          { name: 'range', in: 'query', schema: { type: 'string', enum: ['1w', '2w', '3w', '1m', '3m', '1y', '5y'], default: '1m' } }
+        ],
+        responses: {
+          '200': {
+            description: 'An array of case trend statistics',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      date: { type: 'string' },
+                      total: { type: 'integer' },
+                      pending: { type: 'integer' },
+                      action: { type: 'integer' },
+                      forward: { type: 'integer' },
+                      invite: { type: 'integer' },
+                      rejecte: { type: 'integer' },
+                      completed: { type: 'integer' }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
 
     // --- 6. Utils ---
     '/api/GPS': {
@@ -404,6 +622,54 @@ const swaggerDocument = {
         tags: ['Utilities'],
         parameters: [{ name: 'lat', in: 'query', required: true }, { name: 'lon', in: 'query', required: true }],
         responses: { '200': { description: 'Success', content: { 'application/json': { schema: { $ref: '#/components/schemas/GPS_Address' } } } } }
+      }
+    },
+    '/api/get_issue_status': {
+      get: {
+        summary: 'Get Issue Statuses',
+        tags: ['Utilities'],
+        responses: {
+          '200': {
+            description: 'A list of issue statuses',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: {
+                    type: 'string'
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    '/api/get_issue_types': {
+      get: {
+        summary: 'Get Issue Types',
+        tags: ['Utilities'],
+        responses: {
+          '200': {
+            description: 'A list of issue types',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      issue_id: { type: 'integer' },
+                      name: { type: 'string' },
+                      description: { type: 'string' },
+                      icon_url: { type: 'string' }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
