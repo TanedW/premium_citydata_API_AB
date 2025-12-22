@@ -47,7 +47,7 @@ export default async function handler(req) {
       const sql = neon(process.env.DATABASE_URL);
       const requestUrl = new URL(req.url, `http://${req.headers.get('host')}`);
       const user_id = requestUrl.searchParams.get('user_id');
-      const organization_code = requestUrl.searchParams.get('organization_code');
+      const organization_code = requestUrl.search_params.get('organization_code');
 
       let queryResult;
 
@@ -242,3 +242,4 @@ export default async function handler(req) {
       headers: corsHeaders 
   });
 }
+

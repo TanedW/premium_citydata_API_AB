@@ -1,3 +1,6 @@
+ //api/stats/org-stats
+
+
 import { neon } from '@neondatabase/serverless';
 
 export const config = {

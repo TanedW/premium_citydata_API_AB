@@ -1,4 +1,3 @@
-//api/stats/trend.js
 
 import { neon } from '@neondatabase/serverless';
 

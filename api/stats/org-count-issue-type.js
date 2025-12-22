@@ -1,3 +1,5 @@
+ //api/stats/org-count-issue-type
+
 import { neon } from '@neondatabase/serverless';
 
 export const config = {
