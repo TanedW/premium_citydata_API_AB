@@ -1,22 +1,16 @@
-// /api/organizations.js
 import { neon } from '@neondatabase/serverless';
 
-// แนะนำให้ใช้ Edge Runtime ของ Vercel เพื่อประสิทธิภาพสูงสุด
 export const config = {
   runtime: 'edge',
 };
 
-// ตั้งค่า CORS Headers
 const corsHeaders = {
-  // **สำคัญ:** อย่าลืมเปลี่ยนเป็น URL ของ React App ของคุณ หรือใช้ '*' เพื่อทดสอบ
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app', 
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', // เพิ่ม GET เข้ามา
+  'Access-Control-Allow-Origin': '*', 
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// ฟังก์ชันหลักของ API
 export default async function handler(req) {
-  // 1. ตอบกลับ request แบบ 'OPTIONS' (Preflight)
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -25,37 +19,66 @@ export default async function handler(req) {
     const sql = neon(process.env.DATABASE_URL);
 
     // =========================================================
-    // SECTION 0: GET -> ดึงข้อมูลองค์กร (เพิ่มใหม่)
+    // SECTION 0: GET -> ดึงข้อมูล (รองรับ Dynamic Dropdown)
     // =========================================================
     if (req.method === 'GET') {
-      // ดึง query params จาก URL (เพราะ Edge Runtime ไม่มี req.query แบบปกติ)
       const { searchParams } = new URL(req.url);
       const id = searchParams.get('id');
+      const mode = searchParams.get('mode');          // 'roots' สำหรับหาจังหวัด
+      const ancestorId = searchParams.get('ancestor_id'); // หาอำเภอภายใต้จังหวัดนี้
 
-      if (!id) {
-        return new Response(JSON.stringify({ message: 'Organization ID is required' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+      // CASE A: ดึงข้อมูลองค์กรเดียว (By ID)
+      if (id) {
+        // ดึงข้อมูลองค์กร + หาว่าใครเป็น "แม่" (Depth=1) เพื่อส่งกลับไปให้ Frontend (ถ้าจำเป็นต้องใช้แสดงผล)
+        const data = await sql`
+          SELECT 
+            o.*,
+            (
+              SELECT ancestor_id 
+              FROM organization_hierarchy 
+              WHERE descendant_id = o.organization_id 
+              AND depth = 1 
+              LIMIT 1
+            ) as current_parent_id
+          FROM organizations o
+          WHERE o.organization_id = ${id}
+        `;
+        if (data.length === 0) return new Response(JSON.stringify({ message: 'Not found' }), { status: 404, headers: corsHeaders });
+        return new Response(JSON.stringify(data[0]), { status: 200, headers: corsHeaders });
       }
 
-      // Query ข้อมูลจาก DB
-      const data = await sql`
-        SELECT * FROM organizations WHERE organization_id = ${id}
-      `;
-
-      if (data.length === 0) {
-        return new Response(JSON.stringify({ message: 'Organization not found' }), {
-          status: 404,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+      // CASE B: ดึงรายชื่อ "จังหวัด" (Root Nodes)
+      // คือ Node ที่ไม่มีบรรพบุรุษอื่นเลย (Depth > 0 ไม่ปรากฏในตาราง Hierarchy)
+      if (mode === 'roots') {
+        const roots = await sql`
+          SELECT o.organization_id as id, o.organization_name as name
+          FROM organizations o
+          WHERE NOT EXISTS (
+            SELECT 1 
+            FROM organization_hierarchy h 
+            WHERE h.descendant_id = o.organization_id 
+              AND h.depth > 0
+          )
+          ORDER BY o.organization_name ASC
+        `;
+        return new Response(JSON.stringify(roots), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
-      // ส่งข้อมูลกลับ (รายการแรก)
-      return new Response(JSON.stringify(data[0]), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+      // CASE C: ดึงรายชื่อ "อำเภอ" (Children of specific Ancestor)
+      // คือ Node ที่มี ancestor_id เป็นตัวที่เราเลือก และห่างกัน 1 ชั้น (Depth = 1)
+      if (ancestorId) {
+        const children = await sql`
+          SELECT o.organization_id as id, o.organization_name as name
+          FROM organizations o
+          JOIN organization_hierarchy h ON o.organization_id = h.descendant_id
+          WHERE h.ancestor_id = ${ancestorId}
+            AND h.depth = 1
+          ORDER BY o.organization_name ASC
+        `;
+        return new Response(JSON.stringify(children), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      return new Response(JSON.stringify([]), { status: 200, headers: corsHeaders });
     }
 
     // =========================================================
@@ -64,122 +87,75 @@ export default async function handler(req) {
     if (req.method === 'POST') {
       const body = await req.json();
 
-      // Map ข้อมูลจาก Frontend ให้ตรงกับ Database
       const {
-        organization_code,
-        organization_name,
-        admin_code,
-        // รับค่าได้ทั้ง key ที่มี _id หรือไม่มี (เผื่อ Frontend ส่งมาแบบเก่า)
-        org_type_id = body.org_type || null,
-        usage_type_id = body.usage_type || null,
-        url_logo,
-        district,
-        sub_district,
-        contact_phone,
-        province,
-        latitude,
-        longitude
+        organization_code, organization_name, admin_code,
+        org_type_id, usage_type_id, url_logo,
+        district, sub_district, contact_phone, province,
+        latitude, longitude,
+        // [IMPORTANT] รับตัวแปรนี้เพื่อใช้สร้าง Hierarchy แต่ไม่บันทึกลงตาราง organizations
+        target_parent_id 
       } = body;
 
-      // Validation: ตรวจสอบค่าบังคับ
       if (!organization_code || !organization_name || !admin_code) {
-        return new Response(JSON.stringify({
-          message: 'Missing required fields: organization_code, organization_name, admin_code'
-        }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        return new Response(JSON.stringify({ message: 'Missing required fields' }), { status: 400, headers: corsHeaders });
       }
 
-      // Check Duplicate: เช็คว่ารหัสองค์กรซ้ำหรือไม่
-      const existingOrg = await sql`
-        SELECT organization_code FROM organizations WHERE "organization_code" = ${organization_code}
-      `;
-
-      if (existingOrg.length > 0) {
-        return new Response(JSON.stringify({ message: 'Organization code already exists' }), {
-          status: 409,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      // Insert Data
+      // 1. Insert ลงตารางหลัก (Clean Table: ไม่มี parent_id)
       const newOrg = await sql`
         INSERT INTO organizations (
-          organization_code, 
-          organization_name,
-          admin_code, 
-          org_type_id,
-          usage_type_id,
-          url_logo,
-          district,
-          sub_district,
-          contact_phone,
-          province,
-          latitude,  
-          longitude
-        ) 
-        VALUES (
-          ${organization_code}, 
-          ${organization_name},
-          ${admin_code}, 
-          ${org_type_id},
-          ${usage_type_id},
-          ${url_logo || null},
-          ${district || null},
-          ${sub_district || null},
-          ${contact_phone || null},
-          ${province || null},
-          ${latitude || null},
-          ${longitude || null}
-        ) 
-        RETURNING *; 
+          organization_code, organization_name, admin_code, 
+          org_type_id, usage_type_id, url_logo,
+          district, sub_district, contact_phone, province,
+          latitude, longitude
+        ) VALUES (
+          ${organization_code}, ${organization_name}, ${admin_code}, 
+          ${org_type_id || null}, ${usage_type_id || null}, ${url_logo || null},
+          ${district || null}, ${sub_district || null}, ${contact_phone || null}, ${province || null},
+          ${latitude || null}, ${longitude || null}
+        ) RETURNING organization_id;
       `;
 
-      return new Response(JSON.stringify(newOrg[0]), {
-        status: 201,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      const newOrgId = newOrg[0].organization_id;
+
+      // 2. สร้าง Hierarchy (Closure Table)
+      // 2.1 ใส่ตัวเอง (Depth 0)
+      await sql`
+        INSERT INTO organization_hierarchy (ancestor_id, descendant_id, depth)
+        VALUES (${newOrgId}, ${newOrgId}, 0)
+      `;
+
+      // 2.2 ถ้ามีเป้าหมายแม่ (target_parent_id) ให้ Copy เส้นทางมา
+      if (target_parent_id) {
+        await sql`
+          INSERT INTO organization_hierarchy (ancestor_id, descendant_id, depth)
+          SELECT ancestor_id, ${newOrgId}, depth + 1
+          FROM organization_hierarchy
+          WHERE descendant_id = ${target_parent_id}
+        `;
+      }
+
+      return new Response(JSON.stringify({ ...body, organization_id: newOrgId }), {
+        status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
     // =========================================================
-    // SECTION 2: PUT -> แก้ไขข้อมูล (โดยใช้ organization_id)
+    // SECTION 2: PUT -> แก้ไขข้อมูล / ย้ายสังกัด
     // =========================================================
     if (req.method === 'PUT') {
       const body = await req.json();
-      
-      // รับค่า Primary Key
-      const { organization_id } = body; 
+      const { organization_id, target_parent_id } = body; 
 
       if (!organization_id) {
-        return new Response(JSON.stringify({ message: 'organization_id is required for update' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
+        return new Response(JSON.stringify({ message: 'organization_id is required' }), { status: 400, headers: corsHeaders });
       }
 
-      // Map ข้อมูล (รองรับการส่งมาแค่บางส่วน)
-      const org_type_id = body.org_type_id || body.org_type;
-      const usage_type_id = body.usage_type_id || body.usage_type;
-
-      // 1. ตรวจสอบว่ามี ID นี้ในระบบหรือไม่
-      const checkOrg = await sql`
-        SELECT organization_id FROM organizations WHERE organization_id = ${organization_id}
-      `;
-      
-      if (checkOrg.length === 0) {
-        return new Response(JSON.stringify({ message: 'Organization ID not found' }), {
-          status: 404,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      // 2. อัปเดตข้อมูล (ใช้ COALESCE เพื่ออัปเดตเฉพาะค่าที่ส่งมา ข้อมูลเดิมไม่หาย)
-      const updatedOrg = await sql`
+      // 1. Update ตารางหลัก (เฉพาะข้อมูลทั่วไป)
+      await sql`
         UPDATE organizations SET
           organization_name = COALESCE(${body.organization_name || null}, organization_name),
-          org_type_id       = COALESCE(${org_type_id || null}, org_type_id),
-          usage_type_id     = COALESCE(${usage_type_id || null}, usage_type_id),
+          org_type_id       = COALESCE(${body.org_type_id || body.org_type || null}, org_type_id),
+          usage_type_id     = COALESCE(${body.usage_type_id || body.usage_type || null}, usage_type_id),
           url_logo          = COALESCE(${body.url_logo || null}, url_logo),
           district          = COALESCE(${body.district || null}, district),
           sub_district      = COALESCE(${body.sub_district || null}, sub_district),
@@ -188,26 +164,42 @@ export default async function handler(req) {
           latitude          = COALESCE(${body.latitude || null}, latitude),
           longitude         = COALESCE(${body.longitude || null}, longitude)
         WHERE organization_id = ${organization_id}
-        RETURNING *;
       `;
 
-      return new Response(JSON.stringify(updatedOrg[0]), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      // 2. Handle Hierarchy Change (Move Node)
+      // ถ้ามีการส่ง target_parent_id มา (แม้จะเป็น null) แสดงว่าต้องการเปลี่ยนโครงสร้าง
+      if (target_parent_id !== undefined) {
+         // 2.1 ลบความสัมพันธ์เก่า (ตัดออกจากสายเดิม)
+         await sql`
+           DELETE FROM organization_hierarchy 
+           WHERE descendant_id = ${organization_id} 
+             AND ancestor_id != ${organization_id}
+         `;
+
+         // 2.2 สร้างความสัมพันธ์ใหม่ (ถ้า target_parent_id ไม่ใช่ null)
+         if (target_parent_id) {
+           await sql`
+             INSERT INTO organization_hierarchy (ancestor_id, descendant_id, depth)
+             SELECT ancestor_id, ${organization_id}, depth + 1
+             FROM organization_hierarchy
+             WHERE descendant_id = ${target_parent_id}
+           `;
+         }
+      }
+
+      return new Response(JSON.stringify({ success: true, organization_id }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // หากเรียก Method อื่นที่ไม่รองรับ
     return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), {
-      status: 405,
-      headers: corsHeaders
+      status: 405, headers: corsHeaders
     });
 
   } catch (error) {
     console.error("API Error:", error);
     return new Response(JSON.stringify({ message: 'Internal Server Error', error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
 }
