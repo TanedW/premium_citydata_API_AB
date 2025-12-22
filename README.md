@@ -77,8 +77,6 @@ erDiagram
         TEXT province
         TEXT district
         TEXT sub_district
-        INTEGER parent_id FK
-        TEXT hierarchy_level
     }
     organization_types {
         SERIAL org_type_id PK
