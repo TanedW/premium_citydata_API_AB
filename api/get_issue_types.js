@@ -1,3 +1,6 @@
+// api/get_issue_types.js
+
+
 import { neon } from '@neondatabase/serverless';
 
 export const config = {
