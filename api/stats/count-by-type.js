@@ -55,11 +55,6 @@ export default async function handler(req) {
       const statsResult = await sql`
         SELECT 
           it.name AS issue_type_name, 
-
-
-        COALESCE(it.sla_target_days, 3) AS sla_target_days,
-
-
           COUNT(ic.issue_cases_id) AS count,
           
           /* คำนวณเวลาเฉลี่ย (ชั่วโมง) เฉพาะเคสที่ 'เสร็จสิ้น' */
@@ -79,7 +74,7 @@ export default async function handler(req) {
         WHERE 
           co.organization_id = ${organizationId}
         GROUP BY 
-          it.name, it.sla_target_days
+          it.name
         ORDER BY
           count DESC;
       `;
