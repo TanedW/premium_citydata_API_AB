@@ -1,5 +1,3 @@
-//api/stats/overview: 
-
 import { neon } from '@neondatabase/serverless';
 
 export const config = {
@@ -13,6 +11,7 @@ const corsHeaders = {
 };
 
 export default async function handler(req) {
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
@@ -21,6 +20,7 @@ export default async function handler(req) {
     const sql = neon(process.env.DATABASE_URL);
 
     try {
+      // 1. เตรียมข้อมูลและเช็ค Input เบื้องต้นก่อน (Validation)
       const authHeader = req.headers.get('authorization');
       const accessToken = (authHeader && authHeader.startsWith('Bearer '))
         ? authHeader.split(' ')[1]
@@ -28,15 +28,6 @@ export default async function handler(req) {
 
       if (!accessToken) {
         return new Response(JSON.stringify({ message: 'Authorization token required' }), {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      const userResult = await sql`SELECT user_id FROM users WHERE "access_token" = ${accessToken}`;
-
-      if (userResult.length === 0) {
-        return new Response(JSON.stringify({ message: 'Invalid or expired token' }), {
           status: 401,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
@@ -52,20 +43,37 @@ export default async function handler(req) {
         });
       }
 
-      const statsResult = await sql`
-        SELECT 
-          ic.status, 
-          COUNT(ic.issue_cases_id) AS count
-        FROM 
-          issue_cases ic
-        JOIN 
-          case_organizations co ON ic.issue_cases_id = co.case_id
-        WHERE 
-          co.organization_id = ${organizationId}
-        GROUP BY 
-          ic.status;
-      `;
+      // 2. ยิง Query พร้อมกัน (Parallel Execution) เพื่อลดเวลา Latency
+      // ใช้ Promise.all เพื่อรอผลลัพธ์ทั้ง 2 อันพร้อมกัน
+      const [userResult, statsResult] = await Promise.all([
+        // Query 1: เช็ค User
+        sql`SELECT user_id FROM users WHERE "access_token" = ${accessToken}`,
+        
+        // Query 2: ดึง Stats
+        sql`
+          SELECT 
+            ic.status, 
+            COUNT(ic.issue_cases_id) AS count
+          FROM 
+            issue_cases ic
+          JOIN 
+            case_organizations co ON ic.issue_cases_id = co.case_id
+          WHERE 
+            co.organization_id = ${organizationId}
+          GROUP BY 
+            ic.status;
+        `
+      ]);
 
+      // 3. ตรวจสอบสิทธิ์หลังจากได้ผลลัพธ์มาแล้ว
+      if (userResult.length === 0) {
+        return new Response(JSON.stringify({ message: 'Invalid or expired token' }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 4. ส่งข้อมูลกลับ
       return new Response(JSON.stringify(statsResult), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -80,6 +88,7 @@ export default async function handler(req) {
     }
   }
 
+  // Handle Method Not Allowed
   return new Response(JSON.stringify({ message: `Method ${req.method} Not Allowed` }), {
     status: 405,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' }
