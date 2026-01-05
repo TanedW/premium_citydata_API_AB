@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import dayjs from 'dayjs'; // *แนะนำให้ใช้ Library นี้จัด Format วันที่ใน JS แทน DB จะเร็วกว่า
 
 export const config = {
   runtime: 'edge',
@@ -11,91 +12,97 @@ const corsHeaders = {
 };
 
 export default async function handler(req) {
-  // 1. Handle CORS
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders });
-  }
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
+  if (req.method !== 'GET') return new Response(null, { status: 405, headers: corsHeaders });
 
-  if (req.method === 'GET') {
+  try {
     const sql = neon(process.env.DATABASE_URL);
+    
+    // --- Parse Inputs ---
+    const authHeader = req.headers.get('authorization');
+    const accessToken = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : null;
+    
+    const { searchParams } = new URL(req.url, `https:${req.headers.host}`);
+    const organizationId = searchParams.get('organization_id');
+    const range = searchParams.get('range') || '1w';
 
-    try {
-      // 2. Validate Inputs
-      const authHeader = req.headers.get('authorization');
-      const accessToken = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : null;
+    if (!accessToken) return new Response(JSON.stringify({ message: 'Token required' }), { status: 401, headers: corsHeaders });
+    if (!organizationId) return new Response(JSON.stringify({ message: 'Org ID required' }), { status: 400, headers: corsHeaders });
 
-      if (!accessToken) {
-        return new Response(JSON.stringify({ message: 'Authorization token required' }), { status: 401, headers: corsHeaders });
-      }
+    // --- Prepare Date Interval ---
+    let intervalStr = '7 days';
+    switch (range) {
+      case '1w': intervalStr = '7 days'; break;
+      case '2w': intervalStr = '14 days'; break;
+      case '1m': intervalStr = '1 month'; break;
+      case '3m': intervalStr = '3 months'; break;
+      case '1y': intervalStr = '1 year'; break;
+      case '5y': intervalStr = '5 years'; break;
+    }
 
-      const { searchParams } = new URL(req.url, `https:${req.headers.host}`);
-      const organizationId = searchParams.get('organization_id');
-      const range = searchParams.get('range') || '1w'; // Default 1 week
-
-      if (!organizationId) {
-        return new Response(JSON.stringify({ message: 'Missing organization_id' }), { status: 400, headers: corsHeaders });
-      }
-
-      // 3. Prepare Date Logic
-      let intervalStr = '7 days';
-      let dateFormat = 'DD/MM';
-
-      switch (range) {
-        case '1w': intervalStr = '7 days'; dateFormat = 'DD/MM'; break;
-        case '2w': intervalStr = '14 days'; dateFormat = 'DD/MM'; break;
-        case '1m': intervalStr = '1 month'; dateFormat = 'DD/MM'; break;
-        case '3m': intervalStr = '3 months'; dateFormat = 'MM/YYYY'; break;
-        case '1y': intervalStr = '1 year'; dateFormat = 'MM/YYYY'; break;
-        case '5y': intervalStr = '5 years'; dateFormat = 'YYYY'; break;
-        default:   intervalStr = '7 days';
-      }
-
-      // 4. [Optimization] Parallel Execution (Auth + Main Query)
-      const [userResult, statsResult] = await Promise.all([
-        // Query 1: Check Auth
-        sql`SELECT user_id FROM users WHERE "access_token" = ${accessToken}`,
-
-        // Query 2: Get Activity Stats
-        // ใช้ sql.unsafe หรือ parameter binding ระวังเรื่อง interval
-        // ตรงนี้ใช้ SQL Template String ปกติของ Neon จะปลอดภัยสุด
-        sql`
+    // --- SUPER FAST QUERY (Single Round Trip) ---
+    // รวม Auth + Data ไว้ในก้อนเดียว เพื่อลด HTTP Request เหลือ 1 ครั้งถ้วน
+    const result = await sql`
+      WITH 
+        -- 1. เช็คสิทธิ์ User (ทำงานเร็วมาก)
+        auth_check AS (
+          SELECT user_id FROM users WHERE "access_token" = ${accessToken} LIMIT 1
+        ),
+        -- 2. ดึงข้อมูล (จะทำก็ต่อเมื่อ User ผ่านการตรวจสอบ)
+        stats_data AS (
           SELECT 
-            TO_CHAR(ic.created_at, ${dateFormat}) AS date,
-            COUNT(*) FILTER (
-              WHERE ic.new_value IN ('รอรับเรื่อง', 'กำลังดำเนินการ', 'ส่งต่อ', 'เชิญร่วม', 'ปฏิเสธ', 'เสร็จสิ้น')
-            ) AS total,
-            COUNT(*) FILTER (WHERE ic.new_value = 'รอรับเรื่อง') AS pending,
-            COUNT(*) FILTER (WHERE ic.new_value = 'กำลังดำเนินการ') AS action,
-            COUNT(*) FILTER (WHERE ic.new_value = 'ส่งต่อ') AS forward,
-            COUNT(*) FILTER (WHERE ic.new_value = 'เชิญร่วม') AS invite,
-            COUNT(*) FILTER (WHERE ic.new_value = 'ปฏิเสธ') AS rejected,    
-            COUNT(*) FILTER (WHERE ic.new_value = 'เสร็จสิ้น') AS completed
+            ic.created_at::date AS date_val, -- ใช้ date type เร็วกว่า to_char
+            ic.new_value
           FROM case_activity_logs ic
           JOIN case_organizations co ON ic.case_id = co.case_id
           WHERE 
             co.organization_id = ${organizationId}
             AND ic.created_at >= NOW() - ${intervalStr}::interval
-          GROUP BY 1
-          ORDER BY MIN(ic.created_at) ASC;
-        `
-      ]);
+            AND EXISTS (SELECT 1 FROM auth_check) -- Security Guard
+        )
+      -- 3. รวมผลลัพธ์ส่งกลับ
+      SELECT 
+        (SELECT user_id FROM auth_check) as user_id,
+        (
+          SELECT COALESCE(json_agg(t), '[]'::json)
+          FROM (
+             SELECT 
+                date_val,
+                COUNT(*) FILTER (WHERE new_value IN ('รอรับเรื่อง', 'กำลังดำเนินการ', 'ส่งต่อ', 'เชิญร่วม', 'ปฏิเสธ', 'เสร็จสิ้น')) AS total,
+                COUNT(*) FILTER (WHERE new_value = 'รอรับเรื่อง') AS pending,
+                COUNT(*) FILTER (WHERE new_value = 'กำลังดำเนินการ') AS action,
+                COUNT(*) FILTER (WHERE new_value = 'ส่งต่อ') AS forward,
+                COUNT(*) FILTER (WHERE new_value = 'เชิญร่วม') AS invite,
+                COUNT(*) FILTER (WHERE new_value = 'ปฏิเสธ') AS rejected,    
+                COUNT(*) FILTER (WHERE new_value = 'เสร็จสิ้น') AS completed
+             FROM stats_data
+             GROUP BY 1
+             ORDER BY 1 ASC
+          ) t
+        ) as data;
+    `;
 
-      // 5. Check Auth Result
-      if (userResult.length === 0) {
-        return new Response(JSON.stringify({ message: 'Invalid or expired token' }), { status: 401, headers: corsHeaders });
-      }
+    const row = result[0];
 
-      // 6. Return Data
-      return new Response(JSON.stringify(statsResult), { 
-        status: 200, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      });
-
-    } catch (error) {
-      console.error("--- ACTIVITY STATS ERROR ---", error);
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    // --- Check Auth Result ---
+    if (!row.user_id) {
+      return new Response(JSON.stringify({ message: 'Invalid token' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
-  }
 
-  return new Response(null, { status: 405, headers: corsHeaders });
+    // --- Format Date in JS (Faster than DB TO_CHAR) ---
+    // ใช้ JS วนลูปจัด format วันที่นิดเดียว เร็วกว่าให้ DB แปลง string
+    const finalData = row.data.map(item => ({
+        ...item,
+        date: new Date(item.date_val).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) // DD/MM
+    }));
+
+    return new Response(JSON.stringify(finalData), { 
+      status: 200, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
+
+  } catch (error) {
+    console.error("API Error:", error);
+    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
+  }
 }
