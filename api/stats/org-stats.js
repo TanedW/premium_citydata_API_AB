@@ -30,8 +30,6 @@ export default async function handler(req) {
   try {
     const sql = neon(process.env.DATABASE_URL);
 
-    // Query ข้อมูลรายหน่วยงาน โดยใช้ Closure Table (organization_hierarchy)
-    // ✅ แก้ไข: เติม public. หน้าชื่อตารางทั้ง 5 ตาราง และแก้ชื่อคอลัมน์ case_ratings
     const stats = await sql`
       SELECT 
           o.organization_name as name,
@@ -57,14 +55,13 @@ export default async function handler(req) {
           )::float as avg_days
 
       FROM public.organizations o
-      -- JOIN Closure Table เพื่อดึงเฉพาะ Org ที่เป็นลูกหลาน (หรือตัวเอง) ของ orgId ที่ส่งมา
       JOIN public.organization_hierarchy h ON o.organization_id = h.descendant_id
       
       LEFT JOIN public.case_organizations co ON o.organization_id = co.organization_id
       LEFT JOIN public.issue_cases i ON co.case_id = i.issue_cases_id
       
-      -- ⚠️ แก้ไขจุดสำคัญ: เปลี่ยน r.issue_case_id เป็น r.case_id ให้ตรงกับไฟล์อื่น
-      LEFT JOIN public.case_ratings r ON i.issue_cases_id = r.case_id
+      -- ✅ แก้ไข: เปลี่ยน r.case_id เป็น r.issue_case_id ให้ถูกต้อง
+      LEFT JOIN public.case_ratings r ON i.issue_cases_id = r.issue_case_id
 
       WHERE h.ancestor_id = ${orgId}
 
@@ -72,7 +69,6 @@ export default async function handler(req) {
       ORDER BY total_cases DESC;
     `;
 
-    // Map ผลลัพธ์ให้เป็น Flat Object ตรงตาม Mockup
     const org_stats = stats.map(item => ({
       id: item.id,
       name: item.name,
