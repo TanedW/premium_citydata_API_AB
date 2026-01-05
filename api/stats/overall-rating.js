@@ -20,7 +20,7 @@ export default async function handler(req) {
     const sql = neon(process.env.DATABASE_URL);
 
     try {
-      // 2. ตรวจสอบ Inputs เบื้องต้น (Validation) ก่อนเริ่มเชื่อมต่อ DB
+      // 2. ตรวจสอบ Inputs เบื้องต้น
       const authHeader = req.headers.get('authorization');
       const accessToken = (authHeader && authHeader.startsWith('Bearer ')) 
         ? authHeader.split(' ')[1] 
@@ -43,13 +43,13 @@ export default async function handler(req) {
         });
       }
 
-      // 3. [OPTIMIZATION] ยิง 3 Queries พร้อมกัน (Parallel Execution)
+      // 3. ยิง Queries พร้อมกัน
       const [userResult, aggregatesResult, breakdownResult] = await Promise.all([
-        // Query 1: Check Auth (เติม public.users)
+        // Query 1: Check Auth
         sql`SELECT user_id FROM public.users WHERE "access_token" = ${accessToken}`,
 
         // Query 2: Aggregate (Total & Avg)
-        // ✅ แก้ไข: เติม public. และแก้ r.issue_case_id เป็น r.case_id
+        // ✅ แก้ไข: เปลี่ยน r.case_id กลับเป็น r.issue_case_id
         sql`
           SELECT
               COUNT(r.score) AS total_count,
@@ -57,7 +57,7 @@ export default async function handler(req) {
           FROM 
               public.case_ratings r
           JOIN 
-              public.issue_cases c ON r.case_id = c.issue_cases_id
+              public.issue_cases c ON r.issue_case_id = c.issue_cases_id
           JOIN
               public.case_organizations co ON c.issue_cases_id = co.case_id
           WHERE 
@@ -65,7 +65,7 @@ export default async function handler(req) {
         `,
 
         // Query 3: Breakdown (1-5 Stars)
-        // ✅ แก้ไข: เติม public. และแก้ r.issue_case_id เป็น r.case_id
+        // ✅ แก้ไข: เปลี่ยน r.case_id กลับเป็น r.issue_case_id
         sql`
           SELECT 
               r.score, 
@@ -73,7 +73,7 @@ export default async function handler(req) {
           FROM 
               public.case_ratings r
           JOIN 
-              public.issue_cases c ON r.case_id = c.issue_cases_id
+              public.issue_cases c ON r.issue_case_id = c.issue_cases_id
           JOIN
               public.case_organizations co ON c.issue_cases_id = co.case_id
           WHERE 
@@ -83,7 +83,7 @@ export default async function handler(req) {
         `
       ]);
       
-      // 4. ตรวจสอบผล Auth หลังจากข้อมูลมาครบแล้ว
+      // 4. ตรวจสอบผล Auth
       if (userResult.length === 0) {
         return new Response(JSON.stringify({ message: 'Invalid or expired token' }), { 
           status: 401, 
