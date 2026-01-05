@@ -1,12 +1,11 @@
 import { neon } from '@neondatabase/serverless';
-import dayjs from 'dayjs'; // *แนะนำให้ใช้ Library นี้จัด Format วันที่ใน JS แทน DB จะเร็วกว่า
 
 export const config = {
   runtime: 'edge',
 };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://demo-premium-citydata-pi.vercel.app',
+  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
@@ -18,7 +17,7 @@ export default async function handler(req) {
   try {
     const sql = neon(process.env.DATABASE_URL);
     
-    // --- Parse Inputs ---
+    // --- 1. Parse Inputs ---
     const authHeader = req.headers.get('authorization');
     const accessToken = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : null;
     
@@ -29,7 +28,7 @@ export default async function handler(req) {
     if (!accessToken) return new Response(JSON.stringify({ message: 'Token required' }), { status: 401, headers: corsHeaders });
     if (!organizationId) return new Response(JSON.stringify({ message: 'Org ID required' }), { status: 400, headers: corsHeaders });
 
-    // --- Prepare Date Interval ---
+    // --- 2. Date Interval Logic ---
     let intervalStr = '7 days';
     switch (range) {
       case '1w': intervalStr = '7 days'; break;
@@ -40,27 +39,23 @@ export default async function handler(req) {
       case '5y': intervalStr = '5 years'; break;
     }
 
-    // --- SUPER FAST QUERY (Single Round Trip) ---
-    // รวม Auth + Data ไว้ในก้อนเดียว เพื่อลด HTTP Request เหลือ 1 ครั้งถ้วน
+    // --- 3. Optimized Query (CTE) ---
     const result = await sql`
       WITH 
-        -- 1. เช็คสิทธิ์ User (ทำงานเร็วมาก)
         auth_check AS (
           SELECT user_id FROM users WHERE "access_token" = ${accessToken} LIMIT 1
         ),
-        -- 2. ดึงข้อมูล (จะทำก็ต่อเมื่อ User ผ่านการตรวจสอบ)
         stats_data AS (
           SELECT 
-            ic.created_at::date AS date_val, -- ใช้ date type เร็วกว่า to_char
+            ic.created_at::date AS date_val,
             ic.new_value
           FROM case_activity_logs ic
           JOIN case_organizations co ON ic.case_id = co.case_id
           WHERE 
             co.organization_id = ${organizationId}
             AND ic.created_at >= NOW() - ${intervalStr}::interval
-            AND EXISTS (SELECT 1 FROM auth_check) -- Security Guard
+            AND EXISTS (SELECT 1 FROM auth_check)
         )
-      -- 3. รวมผลลัพธ์ส่งกลับ
       SELECT 
         (SELECT user_id FROM auth_check) as user_id,
         (
@@ -84,17 +79,25 @@ export default async function handler(req) {
 
     const row = result[0];
 
-    // --- Check Auth Result ---
     if (!row.user_id) {
       return new Response(JSON.stringify({ message: 'Invalid token' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // --- Format Date in JS (Faster than DB TO_CHAR) ---
-    // ใช้ JS วนลูปจัด format วันที่นิดเดียว เร็วกว่าให้ DB แปลง string
-    const finalData = row.data.map(item => ({
-        ...item,
-        date: new Date(item.date_val).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) // DD/MM
-    }));
+    // --- 4. Format Date using Native JS (No dayjs needed) ---
+    const finalData = row.data.map(item => {
+        // แปลงวันที่เป็น Date Object
+        const dateObj = new Date(item.date_val);
+        
+        // จัด Format เป็น DD/MM (เช่น 18/01) แบบไม่ใช้ Library
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0'); // Month เริ่มที่ 0
+        const formattedDate = `${day}/${month}`;
+
+        return {
+            ...item,
+            date: formattedDate
+        };
+    });
 
     return new Response(JSON.stringify(finalData), { 
       status: 200, 
