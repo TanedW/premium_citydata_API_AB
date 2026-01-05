@@ -1,6 +1,5 @@
 // /api/cases/[id]/view.js
 
-
 export const config = {
   runtime: 'nodejs',
 };
@@ -17,7 +16,6 @@ const corsHeaders = {
 export default async function handler(req, res) { 
   
   // --- 1. Respond to OPTIONS (Preflight) request ---
-  // ★ ใช้ res.writeHead() และ res.end() สำหรับ OPTIONS
   if (req.method === 'OPTIONS') {
     const headers = {
         ...corsHeaders,
@@ -38,7 +36,6 @@ export default async function handler(req, res) {
 
       // 2.3. ตรวจสอบข้อมูล
       if (!case_id || !organization_id || !user_id) {
-        // ★ ใช้ res.status().json()
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Access-Control-Allow-Origin', corsHeaders['Access-Control-Allow-Origin']);
         return res.status(400).json({ message: 'Missing required fields...' });
@@ -46,7 +43,6 @@ export default async function handler(req, res) {
       
       if (typeof organization_id !== 'number' || !Number.isInteger(organization_id) ||
           typeof user_id !== 'number' || !Number.isInteger(user_id)) {
-         // ★ ใช้ res.status().json()
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Access-Control-Allow-Origin', corsHeaders['Access-Control-Allow-Origin']);
          return res.status(400).json({ message: 'Invalid format: organization_id and user_id must be integers.' });
@@ -61,21 +57,21 @@ export default async function handler(req, res) {
       try {
         await sql`BEGIN`;
 
-        // Step 1: ดึงข้อมูลเก่า
-        const oldCase = await sql`SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id}`;
+        // Step 1: ดึงข้อมูลเก่า (เติม public.)
+        const oldCase = await sql`SELECT status FROM public.issue_cases WHERE issue_cases_id = ${case_id}`;
         if (oldCase.length === 0) throw new Error('Case not found');
         const oldStatus = oldCase[0].status;
         
-        // Step 2: ดึงชื่อเจ้าหน้าที่
-        const officer = await sql`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
+        // Step 2: ดึงชื่อเจ้าหน้าที่ (เติม public.)
+        const officer = await sql`SELECT first_name, last_name FROM public.users WHERE user_id = ${user_id}`;
         if (officer.length === 0) throw new Error('User (officer) not found');
         
         const officerName = `${officer[0].first_name || ''} ${officer[0].last_name || ''}`.trim();
         const comment = `เจ้าหน้าที่เข้าชมเคส โดย ${user_id} ${officerName}`; 
 
-        // Step 3: อัปเดต 'case_organizations'
+        // Step 3: อัปเดต 'case_organizations' (เติม public.)
         const updatedOrg = await sql`
-          UPDATE case_organizations
+          UPDATE public.case_organizations
           SET is_viewed = true
           WHERE case_id = ${case_id} AND organization_id = ${organization_id}
           RETURNING *; 
@@ -87,28 +83,28 @@ export default async function handler(req, res) {
         
         transactionResult = updatedOrg[0];
 
-        // Step 4: อัปเดต 'issue_cases'
+        // Step 4: อัปเดต 'issue_cases' (เติม public.)
         let statusUpdated = false;
         if (oldStatus === 'รอรับเรื่อง') {
           await sql`
-            UPDATE issue_cases
+            UPDATE public.issue_cases
             SET status = ${newStatus}, updated_at = now()
             WHERE issue_cases_id = ${case_id}
           `;
           statusUpdated = true;
         }
         
-        // Step 5: บันทึก 'case_activity_logs'
+        // Step 5: บันทึก 'case_activity_logs' (เติม public.)
         if (statusUpdated) {
           await sql`
-            INSERT INTO case_activity_logs 
+            INSERT INTO public.case_activity_logs 
               (case_id, changed_by_user_id, activity_type, old_value, new_value, comment)
             VALUES 
               (${case_id}, ${user_id}, 'STATUS_CHANGE', ${oldStatus}, ${newStatus}, ${comment})
           `;
         } else {
              await sql`
-               INSERT INTO case_activity_logs
+               INSERT INTO public.case_activity_logs
                  (case_id, changed_by_user_id, activity_type, comment)
                VALUES
                  (${case_id}, ${user_id}, 'COMMENT', ${`เจ้าหน้าที่ ${user_id} ${officerName} เข้าชมเคสซ้ำ (สถานะปัจจุบัน: ${oldStatus})`})
@@ -121,11 +117,10 @@ export default async function handler(req, res) {
       } catch (innerError) {
         console.error("Transaction Error, Rolling back:", innerError.message);
         await sql`ROLLBACK`;
-        throw innerError; // ส่ง Error ให้ catch ด้านนอก
+        throw innerError; 
       }
       
       // 2.5. Transaction สำเร็จ
-      // ★ ใช้ res.status().json() และตั้งค่า Headers
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Access-Control-Allow-Origin', corsHeaders['Access-Control-Allow-Origin']);
       return res.status(200).json(transactionResult);
@@ -143,7 +138,6 @@ export default async function handler(req, res) {
       
       if (status !== 500) message = error.message;
 
-      // ★ ใช้ res.status().json() และตั้งค่า Headers
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Access-Control-Allow-Origin', corsHeaders['Access-Control-Allow-Origin']);
       return res.status(status).json({ message: message, error: error.message });
@@ -151,7 +145,6 @@ export default async function handler(req, res) {
   }
 
   // --- 3. Handle any other HTTP methods ---
-  // ★ ใช้ res.status().json() และตั้งค่า Headers
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', corsHeaders['Access-Control-Allow-Origin']);
   return res.status(405).json({ message: `Method ${req.method} Not Allowed` });

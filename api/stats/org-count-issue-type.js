@@ -31,6 +31,7 @@ export default async function handler(req) {
     const sql = neon(process.env.DATABASE_URL);
 
     // Query ประเภทปัญหา โดยรวมจากทุกหน่วยงานภายใต้ Org ID (Closure Table)
+    // ✅ แก้ไข: เติม public. หน้าชื่อตารางทั้ง 4 ตาราง
     const problemTypes = await sql`
       SELECT 
           t.name as name,
@@ -48,13 +49,13 @@ export default async function handler(req) {
             0
           ) AS avg_resolution_time
 
-      FROM issue_cases i
-      JOIN case_organizations co ON i.issue_cases_id = co.case_id
+      FROM public.issue_cases i
+      JOIN public.case_organizations co ON i.issue_cases_id = co.case_id
       
       -- เชื่อมโยงกับ Closure Table เพื่อตรวจสอบว่า Case นี้อยู่ใน Org ภายใต้สังกัดหรือไม่
-      JOIN organization_hierarchy h ON co.organization_id = h.descendant_id
+      JOIN public.organization_hierarchy h ON co.organization_id = h.descendant_id
       
-      LEFT JOIN issue_types t ON i.issue_type_id = t.issue_id
+      LEFT JOIN public.issue_types t ON i.issue_type_id = t.issue_id
       
       -- กรองเฉพาะ Case ที่เกิดในองค์กรที่มี ancestor_id ตรงกับ orgId ที่ส่งมา
       WHERE h.ancestor_id = ${orgId}

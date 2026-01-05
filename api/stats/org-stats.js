@@ -1,5 +1,4 @@
- //api/stats/org-stats
-
+// /api/stats/org-stats.js
 
 import { neon } from '@neondatabase/serverless';
 
@@ -32,7 +31,7 @@ export default async function handler(req) {
     const sql = neon(process.env.DATABASE_URL);
 
     // Query ข้อมูลรายหน่วยงาน โดยใช้ Closure Table (organization_hierarchy)
-    // h.ancestor_id = orgId คือการหาลูกหลานทั้งหมดของ orgId นั้น
+    // ✅ แก้ไข: เติม public. หน้าชื่อตารางทั้ง 5 ตาราง และแก้ชื่อคอลัมน์ case_ratings
     const stats = await sql`
       SELECT 
           o.organization_name as name,
@@ -57,13 +56,15 @@ export default async function handler(req) {
             FILTER (WHERE i.status = 'เสร็จสิ้น'), 0
           )::float as avg_days
 
-      FROM organizations o
+      FROM public.organizations o
       -- JOIN Closure Table เพื่อดึงเฉพาะ Org ที่เป็นลูกหลาน (หรือตัวเอง) ของ orgId ที่ส่งมา
-      JOIN organization_hierarchy h ON o.organization_id = h.descendant_id
+      JOIN public.organization_hierarchy h ON o.organization_id = h.descendant_id
       
-      LEFT JOIN case_organizations co ON o.organization_id = co.organization_id
-      LEFT JOIN issue_cases i ON co.case_id = i.issue_cases_id
-      LEFT JOIN case_ratings r ON i.issue_cases_id = r.issue_case_id
+      LEFT JOIN public.case_organizations co ON o.organization_id = co.organization_id
+      LEFT JOIN public.issue_cases i ON co.case_id = i.issue_cases_id
+      
+      -- ⚠️ แก้ไขจุดสำคัญ: เปลี่ยน r.issue_case_id เป็น r.case_id ให้ตรงกับไฟล์อื่น
+      LEFT JOIN public.case_ratings r ON i.issue_cases_id = r.case_id
 
       WHERE h.ancestor_id = ${orgId}
 

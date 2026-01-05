@@ -36,25 +36,23 @@ export default async function handler(req) {
         });
       }
 
-      // ✅ แก้ไข: เพิ่ม Subquery คำนวณ rating จากตาราง case_ratings
+      // ✅ แก้ไข: เติม public. หน้าชื่อตารางทุกจุด
       const caseResult = await sql`
        SELECT 
-      ic.*,
-      org.organization_name AS agency_name,
-      it.name AS issue_category_name,
-      (
-          -- ✅ แก้ไข: ROUND(..., 1) คือเอาทศนิยม 1 ตำแหน่ง และ ::float เพื่อให้เป็นตัวเลข
-          SELECT COALESCE(ROUND(AVG(score), 1), 0)::float 
-          FROM case_ratings 
-          WHERE case_id = ic.issue_cases_id
-      ) AS rating
-  FROM issue_cases ic
-        
-        LEFT JOIN case_organizations co ON ic.issue_cases_id = co.case_id
-        LEFT JOIN organizations org ON co.organization_id = org.organization_id
-        LEFT JOIN issue_types it ON ic.issue_type_id = it.issue_id 
-        WHERE ic.issue_cases_id = ${id} 
-        LIMIT 1
+          ic.*,
+          org.organization_name AS agency_name,
+          it.name AS issue_category_name,
+          (
+              SELECT COALESCE(ROUND(AVG(score), 1), 0)::float 
+              FROM public.case_ratings 
+              WHERE case_id = ic.issue_cases_id
+          ) AS rating
+      FROM public.issue_cases ic
+        LEFT JOIN public.case_organizations co ON ic.issue_cases_id = co.case_id
+        LEFT JOIN public.organizations org ON co.organization_id = org.organization_id
+        LEFT JOIN public.issue_types it ON ic.issue_type_id = it.issue_id 
+      WHERE ic.issue_cases_id = ${id} 
+      LIMIT 1
       `;
 
       if (caseResult.length === 0) {
@@ -64,6 +62,7 @@ export default async function handler(req) {
         });
       }
 
+      // ✅ แก้ไข: เติม public. หน้าชื่อตาราง
       const rawLogs = await sql`
         SELECT 
           cal.created_at, 
@@ -74,8 +73,8 @@ export default async function handler(req) {
           cal.comment,
           u.first_name,
           u.last_name
-        FROM case_activity_logs cal
-        LEFT JOIN users u ON cal.changed_by_user_id = u.user_id
+        FROM public.case_activity_logs cal
+        LEFT JOIN public.users u ON cal.changed_by_user_id = u.user_id
         WHERE cal.case_id = ${id} 
         ORDER BY cal.created_at DESC
       `;
@@ -130,7 +129,8 @@ export default async function handler(req) {
 
       let officerLabel = `เจ้าหน้าที่ ${user_id}`;
       if (user_id) {
-        const officerRes = await sql`SELECT first_name, last_name FROM users WHERE user_id = ${user_id}`;
+        // ✅ แก้ไข: เติม public. หน้า users
+        const officerRes = await sql`SELECT first_name, last_name FROM public.users WHERE user_id = ${user_id}`;
         if (officerRes.length > 0) {
             const fullName = `${officerRes[0].first_name || ''} ${officerRes[0].last_name || ''}`.trim();
             officerLabel = `เจ้าหน้าที่ ${user_id} ${fullName}`;
@@ -141,15 +141,18 @@ export default async function handler(req) {
       if (action === 'update_status') {
         const { new_status, comment, image_url } = data; 
         
-        const currentCase = await sql`SELECT status FROM issue_cases WHERE issue_cases_id = ${case_id} LIMIT 1`;
+        // ✅ แก้ไข: เติม public.
+        const currentCase = await sql`SELECT status FROM public.issue_cases WHERE issue_cases_id = ${case_id} LIMIT 1`;
         if (currentCase.length === 0) return new Response(JSON.stringify({ message: 'Case not found' }), { status: 404, headers: corsHeaders });
         const realOldStatus = currentCase[0].status;
 
-        await sql`UPDATE issue_cases SET status = ${new_status}, updated_at = NOW() WHERE issue_cases_id = ${case_id}`;
+        // ✅ แก้ไข: เติม public.
+        await sql`UPDATE public.issue_cases SET status = ${new_status}, updated_at = NOW() WHERE issue_cases_id = ${case_id}`;
         
         if (image_url && image_url.trim() !== "") {
+            // ✅ แก้ไข: เติม public.
             await sql`
-              INSERT INTO case_media (case_id, media_type, url, uploader_role) 
+              INSERT INTO public.case_media (case_id, media_type, url, uploader_role) 
               VALUES (${case_id}, 'image', ${image_url}, 'OFFICER')
             `;
         }
@@ -158,8 +161,9 @@ export default async function handler(req) {
         if (comment && comment.trim() !== "") fullLogComment += ` : ${comment}`;
         if (image_url) fullLogComment += ` [แนบรูปประกอบ]`;
         
+        // ✅ แก้ไข: เติม public.
         await sql`
-          INSERT INTO case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
+          INSERT INTO public.case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
           VALUES (${case_id}, 'STATUS_CHANGE', ${realOldStatus}, ${new_status}, ${user_id || null}, ${fullLogComment})
         `;
 
@@ -172,12 +176,14 @@ export default async function handler(req) {
       if (action === 'update_category') {
         const { new_type_id, new_type_name, old_type_name } = data;
         
-        await sql`UPDATE issue_cases SET issue_type_id = ${new_type_id} WHERE issue_cases_id = ${case_id}`;
+        // ✅ แก้ไข: เติม public.
+        await sql`UPDATE public.issue_cases SET issue_type_id = ${new_type_id} WHERE issue_cases_id = ${case_id}`;
         
         const fullComment = `${officerLabel} เปลี่ยนประเภทปัญหาเป็น "${new_type_name}"`;
         
+        // ✅ แก้ไข: เติม public.
         await sql`
-          INSERT INTO case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
+          INSERT INTO public.case_activity_logs (case_id, activity_type, old_value, new_value, changed_by_user_id, comment)
           VALUES (${case_id}, 'TYPE_CHANGE', ${old_type_name}, ${new_type_name}, ${user_id || null}, ${fullComment})
         `;
         

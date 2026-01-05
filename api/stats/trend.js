@@ -5,7 +5,7 @@ import { neon } from '@neondatabase/serverless';
 export const config = { runtime: 'edge' };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // ปรับให้ปลอดภัยขึ้นหากจำเป็น
+  'Access-Control-Allow-Origin': '*', 
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
@@ -33,9 +33,10 @@ export default async function handler(req) {
           ic.title, 
           ic.created_at, 
           it.name as issue_type_name
-        FROM issue_cases ic
-        JOIN case_organizations co ON ic.issue_cases_id = co.case_id
-        LEFT JOIN issue_types it ON ic.issue_type_id = it.issue_id
+        -- ✅ แก้ไข: เติม public. หน้า issue_cases, case_organizations, issue_types
+        FROM public.issue_cases ic
+        JOIN public.case_organizations co ON ic.issue_cases_id = co.case_id
+        LEFT JOIN public.issue_types it ON ic.issue_type_id = it.issue_id
         WHERE 
           co.organization_id = ${organizationId}
           AND ic.status = 'เสร็จสิ้น'
@@ -50,7 +51,8 @@ export default async function handler(req) {
           -- หาเวลาเสร็จสิ้น
           MIN(cal.created_at) FILTER (WHERE cal.new_value = 'เสร็จสิ้น') as finish_time
         FROM target_cases tc
-        JOIN case_activity_logs cal ON tc.issue_cases_id = cal.case_id
+        -- ✅ แก้ไข: เติม public. หน้า case_activity_logs
+        JOIN public.case_activity_logs cal ON tc.issue_cases_id = cal.case_id
         GROUP BY tc.issue_cases_id
       )
       SELECT 

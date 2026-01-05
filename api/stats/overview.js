@@ -46,18 +46,18 @@ export default async function handler(req) {
       // 2. ยิง Query พร้อมกัน (Parallel Execution) เพื่อลดเวลา Latency
       // ใช้ Promise.all เพื่อรอผลลัพธ์ทั้ง 2 อันพร้อมกัน
       const [userResult, statsResult] = await Promise.all([
-        // Query 1: เช็ค User
-        sql`SELECT user_id FROM users WHERE "access_token" = ${accessToken}`,
+        // Query 1: เช็ค User (เติม public.)
+        sql`SELECT user_id FROM public.users WHERE "access_token" = ${accessToken}`,
         
-        // Query 2: ดึง Stats
+        // Query 2: ดึง Stats (เติม public. ทั้ง issue_cases และ case_organizations)
         sql`
           SELECT 
             ic.status, 
             COUNT(ic.issue_cases_id) AS count
           FROM 
-            issue_cases ic
+            public.issue_cases ic
           JOIN 
-            case_organizations co ON ic.issue_cases_id = co.case_id
+            public.case_organizations co ON ic.issue_cases_id = co.case_id
           WHERE 
             co.organization_id = ${organizationId}
           GROUP BY 

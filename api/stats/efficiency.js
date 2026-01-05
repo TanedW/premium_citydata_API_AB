@@ -6,7 +6,6 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  // เพิ่ม Cache-Control เพื่อให้ Browser ไม่ต้องยิงซ้ำบ่อยๆ (ช่วยลด Load ได้จริง)
   'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=30' 
 };
 
@@ -19,8 +18,6 @@ export default async function handler(req) {
     const { searchParams } = new URL(req.url, `https:${req.headers.host}`);
     const organizationId = searchParams.get('organization_id');
     
-    // Default ดูย้อนหลังแค่ 6 เดือน (ช่วยเรื่องความเร็วได้มหาศาล)
-    // ถ้าอยากได้ทั้งหมดจริงๆ ให้ส่ง query param: ?months=0
     const monthsBack = parseInt(searchParams.get('months') || '6'); 
 
     if (!organizationId) {
@@ -29,35 +26,35 @@ export default async function handler(req) {
 
     const result = await sql`
       WITH target_candidates AS (
-        -- 1. กรองเฉพาะเคสของ Org นี้ ที่เสร็จแล้ว และอยู่ในช่วงเวลาที่กำหนด (Scan น้อยลง)
+        -- 1. กรองเฉพาะเคส (เติม public.issue_cases และ public.case_organizations)
         SELECT 
             ic.issue_cases_id,
             ic.title,
             ic.created_at,
             ic.issue_type_id
-        FROM issue_cases ic
-        JOIN case_organizations co ON ic.issue_cases_id = co.case_id
+        FROM public.issue_cases ic
+        JOIN public.case_organizations co ON ic.issue_cases_id = co.case_id
         WHERE 
             co.organization_id = ${organizationId}
             AND ic.status = 'เสร็จสิ้น'
             ${monthsBack > 0 ? sql`AND ic.created_at >= NOW() - (${monthsBack} || ' months')::interval` : sql``}
       ),
       calculated_times AS (
-        -- 2. คำนวณเวลาเฉพาะ Candidate เหล่านี้เท่านั้น (ไม่ต้อง Group By ทั้งตาราง)
+        -- 2. คำนวณเวลา (เติม public.case_activity_logs ใน Subqueries ทั้ง 3 จุด)
         SELECT 
             tc.issue_cases_id,
             tc.title,
             tc.issue_type_id,
             tc.created_at,
-            -- Subquery ดึงเวลาจบงาน (เร็วเพราะมี Index case_id)
-            (SELECT created_at FROM case_activity_logs WHERE case_id = tc.issue_cases_id AND new_value = 'เสร็จสิ้น' LIMIT 1) as finish_time,
-            -- Subquery ดึงเวลาเริ่ม action (response)
-            (SELECT created_at FROM case_activity_logs WHERE case_id = tc.issue_cases_id AND new_value NOT IN ('รอรับเรื่อง') ORDER BY created_at ASC LIMIT 1) as action_time,
-            -- Subquery ดึงเวลาเริ่ม process
-            (SELECT created_at FROM case_activity_logs WHERE case_id = tc.issue_cases_id AND new_value = 'กำลังดำเนินการ' LIMIT 1) as process_time
+            -- Subquery 1
+            (SELECT created_at FROM public.case_activity_logs WHERE case_id = tc.issue_cases_id AND new_value = 'เสร็จสิ้น' LIMIT 1) as finish_time,
+            -- Subquery 2
+            (SELECT created_at FROM public.case_activity_logs WHERE case_id = tc.issue_cases_id AND new_value NOT IN ('รอรับเรื่อง') ORDER BY created_at ASC LIMIT 1) as action_time,
+            -- Subquery 3
+            (SELECT created_at FROM public.case_activity_logs WHERE case_id = tc.issue_cases_id AND new_value = 'กำลังดำเนินการ' LIMIT 1) as process_time
         FROM target_candidates tc
       )
-      -- 3. คำนวณ Duration, เรียงลำดับ แล้วค่อย Join Issue Type
+      -- 3. Final Select (เติม public.issue_types)
       SELECT 
         ct.title,
         it.name as issue_type,
@@ -78,7 +75,7 @@ export default async function handler(req) {
         EXTRACT(EPOCH FROM (COALESCE(ct.finish_time, NOW()) - ct.created_at)) / 3600 as total_hours
 
       FROM calculated_times ct
-      LEFT JOIN issue_types it ON ct.issue_type_id = it.issue_id -- Join ตอนท้ายสุด ประหยัดแรง
+      LEFT JOIN public.issue_types it ON ct.issue_type_id = it.issue_id 
       ORDER BY total_hours DESC
       LIMIT 10;
     `;

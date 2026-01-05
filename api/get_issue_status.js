@@ -1,6 +1,5 @@
 // api/get_issue_status.js
 
-
 import { neon } from '@neondatabase/serverless';
 
 export const config = {
@@ -30,21 +29,20 @@ export default async function handler(req) {
       let result;
 
       if (organization_id) {
-        // ✅ กรณีระบุ Org ID: ต้อง JOIN กับตาราง case_organizations (ตามรูปที่คุณส่งมา)
-        // สมมติว่า PK ของ issue_cases คือ 'id' (UUID) ที่ไปตรงกับ 'case_id'
+        // ✅ แก้ไข: เติม public. หน้าชื่อตารางทั้ง 2 จุด
         result = await sql`
           SELECT DISTINCT ic.status 
-          FROM issue_cases ic
-          INNER JOIN case_organizations co ON ic.issue_cases_id = co.case_id 
+          FROM public.issue_cases ic
+          INNER JOIN public.case_organizations co ON ic.issue_cases_id = co.case_id 
           WHERE co.organization_id = ${organization_id}
           AND ic.status IS NOT NULL
           ORDER BY ic.status ASC
         `;
       } else {
-        // ✅ กรณีไม่ระบุ: ดึงทั้งหมดจาก issue_cases ตรงๆ
+        // ✅ แก้ไข: เติม public. หน้าชื่อตาราง
         result = await sql`
           SELECT DISTINCT status 
-          FROM issue_cases 
+          FROM public.issue_cases 
           WHERE status IS NOT NULL 
           ORDER BY status ASC
         `;

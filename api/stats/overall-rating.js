@@ -44,37 +44,38 @@ export default async function handler(req) {
       }
 
       // 3. [OPTIMIZATION] ยิง 3 Queries พร้อมกัน (Parallel Execution)
-      // ไม่ต้องรอทีละอัน
       const [userResult, aggregatesResult, breakdownResult] = await Promise.all([
-        // Query 1: Check Auth
-        sql`SELECT user_id FROM users WHERE "access_token" = ${accessToken}`,
+        // Query 1: Check Auth (เติม public.users)
+        sql`SELECT user_id FROM public.users WHERE "access_token" = ${accessToken}`,
 
         // Query 2: Aggregate (Total & Avg)
+        // ✅ แก้ไข: เติม public. และแก้ r.issue_case_id เป็น r.case_id
         sql`
           SELECT
               COUNT(r.score) AS total_count,
               AVG(r.score) AS overall_average
           FROM 
-              case_ratings r
+              public.case_ratings r
           JOIN 
-              issue_cases c ON r.issue_case_id = c.issue_cases_id
+              public.issue_cases c ON r.case_id = c.issue_cases_id
           JOIN
-              case_organizations co ON c.issue_cases_id = co.case_id
+              public.case_organizations co ON c.issue_cases_id = co.case_id
           WHERE 
               co.organization_id = ${organizationId}
         `,
 
         // Query 3: Breakdown (1-5 Stars)
+        // ✅ แก้ไข: เติม public. และแก้ r.issue_case_id เป็น r.case_id
         sql`
           SELECT 
               r.score, 
               COUNT(r.score) AS count
           FROM 
-              case_ratings r
+              public.case_ratings r
           JOIN 
-              issue_cases c ON r.issue_case_id = c.issue_cases_id
+              public.issue_cases c ON r.case_id = c.issue_cases_id
           JOIN
-              case_organizations co ON c.issue_cases_id = co.case_id
+              public.case_organizations co ON c.issue_cases_id = co.case_id
           WHERE 
               co.organization_id = ${organizationId}
           GROUP BY 
@@ -90,7 +91,7 @@ export default async function handler(req) {
         });
       }
 
-      // 5. จัดการข้อมูล (Data Processing) - ส่วนนี้เร็วมาก (ระดับ Microsecond)
+      // 5. จัดการข้อมูล (Data Processing)
       const aggregates = aggregatesResult[0] || {};
       const total_count = parseInt(aggregates.total_count || 0, 10);
       const overall_average = parseFloat(aggregates.overall_average || 0);

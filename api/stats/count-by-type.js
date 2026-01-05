@@ -32,7 +32,8 @@ export default async function handler(req) {
         });
       }
 
-      const userResult = await sql`SELECT user_id FROM users WHERE "access_token" = ${accessToken}`;
+      // ✅ แก้ไข 1: เติม public.users
+      const userResult = await sql`SELECT user_id FROM public.users WHERE "access_token" = ${accessToken}`;
       
       if (userResult.length === 0) {
         return new Response(JSON.stringify({ message: 'Invalid or expired token' }), { 
@@ -51,7 +52,7 @@ export default async function handler(req) {
         });
       }
 
-      // --- ส่วนที่แก้ไข SQL ---
+      // ✅ แก้ไข 2: เติม public. หน้าชื่อตารางทั้ง 3 จุด (issue_cases, case_organizations, issue_types)
       const statsResult = await sql`
         SELECT 
           it.name AS issue_type_name, 
@@ -66,11 +67,11 @@ export default async function handler(req) {
           ) AS avg_resolution_time
 
         FROM 
-          issue_cases ic
+          public.issue_cases ic
         JOIN 
-          case_organizations co ON ic.issue_cases_id = co.case_id
+          public.case_organizations co ON ic.issue_cases_id = co.case_id
         JOIN
-          issue_types it ON ic.issue_type_id = it.issue_id
+          public.issue_types it ON ic.issue_type_id = it.issue_id
         WHERE 
           co.organization_id = ${organizationId}
         GROUP BY 
