@@ -1,89 +1,104 @@
+// api/stats/efficiency
+
 import { neon } from '@neondatabase/serverless';
 
-export const config = {
-  runtime: 'edge',
-};
+export const config = { runtime: 'edge' };
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': '*', // ปรับให้ปลอดภัยขึ้นหากจำเป็น
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  // 🔥 เพิ่ม Cache: เก็บผลลัพธ์ไว้ 60 วินาที (User คนถัดไปจะโหลดเสร็จใน 50ms)
-  'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=30'
 };
 
 export default async function handler(req) {
-  // Handle CORS
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== 'GET') return new Response(null, { status: 405, headers: corsHeaders });
 
   try {
     const sql = neon(process.env.DATABASE_URL);
-
-    // 1. Check Input (Validate เร็วๆ ก่อนต่อ DB)
-    const authHeader = req.headers.get('authorization');
-    const accessToken = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : null;
-    
     const { searchParams } = new URL(req.url, `https:${req.headers.host}`);
     const organizationId = searchParams.get('organization_id');
-    const range = searchParams.get('range') || '1w';
 
-    if (!accessToken) return new Response(JSON.stringify({ message: 'Token required' }), { status: 401, headers: corsHeaders });
-    if (!organizationId) return new Response(JSON.stringify({ message: 'Org ID required' }), { status: 400, headers: corsHeaders });
-
-    // 2. Prepare Date Logic (Native JS)
-    let intervalStr = '7 days';
-    // Mapping ช่วงเวลาให้ตรงกับ PostgreSQL Interval
-    switch (range) {
-      case '1w': intervalStr = '7 days'; break;
-      case '2w': intervalStr = '14 days'; break;
-      case '1m': intervalStr = '1 month'; break;
-      case '3m': intervalStr = '3 months'; break;
-      case '1y': intervalStr = '1 year'; break;
-      case '5y': intervalStr = '5 years'; break;
+    if (!organizationId) {
+      return new Response(JSON.stringify({ message: 'Missing organization_id' }), { status: 400, headers: corsHeaders });
     }
 
-    // 3. Parallel Execution: ยิง 2 Query พร้อมกัน (Auth + Data)
-    // การแยก Query ช่วยให้ DB Planner ทำงานง่ายกว่า CTE ซับซ้อนในบางกรณี
-    const [userResult, rawStats] = await Promise.all([
-      // Query 1: Auth Check
-      sql`SELECT user_id FROM users WHERE "access_token" = ${accessToken} LIMIT 1`,
-
-      // Query 2: Get Stats (Return แค่ไม่กี่แถวตามจำนวนวัน)
-      sql`
+    // --- OPTIMIZED QUERY ---
+    // 1. ดึงเคสที่เกี่ยวข้องมาก่อน (Target Cases)
+    // 2. ดึง Log ของเคสเหล่านั้น แล้ว Pivot เวลาทั้ง 3 ช่วงออกมาใน scan เดียว
+    const result = await sql`
+      WITH target_cases AS (
         SELECT 
-          ic.created_at::date as date_val,
-          COUNT(*) FILTER (WHERE ic.new_value IN ('รอรับเรื่อง', 'กำลังดำเนินการ', 'ส่งต่อ', 'เชิญร่วม', 'ปฏิเสธ', 'เสร็จสิ้น')) AS total,
-          COUNT(*) FILTER (WHERE ic.new_value = 'รอรับเรื่อง') AS pending,
-          COUNT(*) FILTER (WHERE ic.new_value = 'กำลังดำเนินการ') AS action,
-          COUNT(*) FILTER (WHERE ic.new_value = 'ส่งต่อ') AS forward,
-          COUNT(*) FILTER (WHERE ic.new_value = 'เชิญร่วม') AS invite,
-          COUNT(*) FILTER (WHERE ic.new_value = 'ปฏิเสธ') AS rejected,    
-          COUNT(*) FILTER (WHERE ic.new_value = 'เสร็จสิ้น') AS completed
-        FROM case_activity_logs ic
-        JOIN case_organizations co ON ic.case_id = co.case_id
+          ic.issue_cases_id, 
+          ic.title, 
+          ic.created_at, 
+          it.name as issue_type_name
+        FROM issue_cases ic
+        JOIN case_organizations co ON ic.issue_cases_id = co.case_id
+        LEFT JOIN issue_types it ON ic.issue_type_id = it.issue_id
         WHERE 
           co.organization_id = ${organizationId}
-          AND ic.created_at >= NOW() - ${intervalStr}::interval
-        GROUP BY 1
-        ORDER BY 1 ASC;
-      `
-    ]);
+          AND ic.status = 'เสร็จสิ้น'
+      ),
+      case_milestones AS (
+        SELECT 
+          tc.issue_cases_id,
+          -- หาเวลา Action แรก (ที่ไม่ใช่ รอรับเรื่อง)
+          MIN(cal.created_at) FILTER (WHERE cal.new_value NOT IN ('รอรับเรื่อง')) as action_time,
+          -- หาเวลาเริ่มดำเนินการ
+          MIN(cal.created_at) FILTER (WHERE cal.new_value = 'กำลังดำเนินการ') as process_time,
+          -- หาเวลาเสร็จสิ้น
+          MIN(cal.created_at) FILTER (WHERE cal.new_value = 'เสร็จสิ้น') as finish_time
+        FROM target_cases tc
+        JOIN case_activity_logs cal ON tc.issue_cases_id = cal.case_id
+        GROUP BY tc.issue_cases_id
+      )
+      SELECT 
+        tc.title,
+        tc.issue_type_name as issue_type,
+        
+        -- Stage 1: Response (Action Time - Created Time)
+        EXTRACT(EPOCH FROM (COALESCE(cm.action_time, cm.process_time, cm.finish_time, NOW()) - tc.created_at)) / 3600 as stage1_hours,
 
-    // 4. Validate Auth
-    if (userResult.length === 0) {
-      return new Response(JSON.stringify({ message: 'Invalid token' }), { status: 401, headers: corsHeaders });
-    }
+        -- Stage 2: Coordination (Process Time - Action Time)
+        CASE 
+            WHEN cm.process_time IS NOT NULL AND cm.action_time IS NOT NULL 
+                THEN EXTRACT(EPOCH FROM (cm.process_time - cm.action_time)) / 3600
+            WHEN cm.process_time IS NULL AND cm.finish_time IS NOT NULL AND cm.action_time IS NOT NULL
+                THEN EXTRACT(EPOCH FROM (cm.finish_time - cm.action_time)) / 3600
+            ELSE 0 
+        END as stage2_hours,
 
-    // 5. Format Date (ทำใน JS เร็วกว่า DB)
-    const formattedData = rawStats.map(item => {
-      const d = new Date(item.date_val);
-      // Format: DD/MM (Native JS, No library needed)
-      const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
-      
+        -- Stage 3: Execution (Finish Time - Process Time)
+        CASE 
+            WHEN cm.finish_time IS NOT NULL AND cm.process_time IS NOT NULL 
+                THEN EXTRACT(EPOCH FROM (cm.finish_time - cm.process_time)) / 3600
+            ELSE 0 
+        END as stage3_hours,
+
+        -- Total Duration
+        EXTRACT(EPOCH FROM (COALESCE(cm.finish_time, NOW()) - tc.created_at)) / 3600 as total_hours
+
+      FROM target_cases tc
+      JOIN case_milestones cm ON tc.issue_cases_id = cm.issue_cases_id
+      ORDER BY total_hours DESC
+      LIMIT 10;
+    `;
+
+    // Format Data (Logic เดิม แต่เอามาทำใน JS เพื่อลดภาระ DB ในการจัดการ string)
+    const formattedData = result.map(row => {
+      const rawTitle = row.title || 'ไม่มีหัวข้อ';
+      const displayTitle = rawTitle.length > 20 ? rawTitle.substring(0, 20) + '...' : rawTitle;
+
       return {
-        ...item,
-        date: dateStr
+        title: displayTitle,
+        full_title: rawTitle,
+        type: row.issue_type || 'ไม่ระบุ',
+        // ใช้ Math.max(0, ...) เพื่อกันค่าติดลบกรณี timestamp ใน DB บันทึกสลับกัน
+        stage1: parseFloat(Math.max(0, parseFloat(row.stage1_hours || 0)).toFixed(2)),
+        stage2: parseFloat(Math.max(0, parseFloat(row.stage2_hours || 0)).toFixed(2)),
+        stage3: parseFloat(Math.max(0, parseFloat(row.stage3_hours || 0)).toFixed(2)),
+        total: parseFloat(Math.max(0, parseFloat(row.total_hours || 0)).toFixed(2))
       };
     });
 
@@ -93,7 +108,10 @@ export default async function handler(req) {
     });
 
   } catch (error) {
-    console.error("API Error:", error);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
+    console.error("Efficiency API Error:", error);
+    return new Response(JSON.stringify({ error: error.message }), { 
+      status: 500, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
   }
 }
